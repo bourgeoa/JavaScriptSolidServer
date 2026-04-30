@@ -8,7 +8,7 @@ import { getWebIdFromRequestAsync } from './token.js';
 import { checkAccess, getRequiredMode } from '../wac/checker.js';
 import { AccessMode } from '../wac/parser.js';
 import * as storage from '../storage/filesystem.js';
-import { getEffectiveUrlPath } from '../utils/url.js';
+import { getEffectiveUrlPath, getBaseDomainHost } from '../utils/url.js';
 import { generateDatabrowserHtml, generateModuleDatabrowserHtml } from '../mashlib/index.js';
 
 /**
@@ -27,7 +27,7 @@ export function buildResourceUrl(request, urlPath) {
   // Use request.headers.host (includes port) instead of request.hostname (strips port)
   const host = request.headers.host || request.hostname;
   if (request.subdomainsEnabled && request.baseDomain &&
-      request.hostname === request.baseDomain && !request.podName) {
+      request.hostname === getBaseDomainHost(request.baseDomain) && !request.podName) {
     const pathMatch = urlPath.match(/^\/([^/]+)(\/.*)?$/);
     // Treat a path segment as a pod name only if it looks like one:
     //   - not a dotfile (.well-known, .acl, .meta, ...)
