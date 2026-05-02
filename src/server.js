@@ -22,6 +22,7 @@ import { webrtcPlugin } from './webrtc/index.js';
 import { tunnelPlugin } from './tunnel/index.js';
 import { terminalPlugin } from './terminal/index.js';
 import { registerErrorHandler } from './utils/error-handler.js';
+import { getBaseDomainHost } from './utils/url.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -205,11 +206,14 @@ export function createServer(options = {}) {
 
     // Extract pod name from subdomain if enabled
     if (subdomainsEnabled && baseDomain) {
-      const host = request.hostname;
-      // Check if host is a subdomain of baseDomain
-      if (host !== baseDomain && host.endsWith('.' + baseDomain)) {
+      // request.hostname may include port in some Fastify versions — strip it
+      const rawHost = request.hostname;
+      const host = rawHost.includes(':') ? rawHost.split(':')[0] : rawHost;
+      const baseDomainHost = getBaseDomainHost(baseDomain);
+      // Check if host is a subdomain of baseDomain (hostname part only)
+      if (host !== baseDomainHost && host.endsWith('.' + baseDomainHost)) {
         // Extract subdomain (e.g., "alice.example.com" -> "alice")
-        const subdomain = host.slice(0, -(baseDomain.length + 1));
+        const subdomain = host.slice(0, -(baseDomainHost.length + 1));
         // Only single-level subdomains (no dots)
         if (!subdomain.includes('.')) {
           request.podName = subdomain;
