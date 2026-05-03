@@ -1,0 +1,24 @@
+services:
+  jss:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.jss
+    container_name: jss
+    restart: unless-stopped
+    environment:
+      JSS_INTERNAL_PORT: ${JSS_INTERNAL_PORT:-3000}
+      JSS_EXTERNAL_PORT: ${JSS_EXTERNAL_PORT:-3000}
+      JSS_DATA_ROOT: /data
+      JSS_REPO_URL: ${JSS_REPO_URL:-https://github.com/JavaScriptSolidServer/JavaScriptSolidServer.git}
+      JSS_SSL: ${JSS_SSL:-false}
+      JSS_SSL_KEY_PATH: ${JSS_SSL_KEY_PATH:-/certs/privkey.pem}
+      JSS_SSL_CERT_PATH: ${JSS_SSL_CERT_PATH:-/certs/fullchain.pem}
+    ports:
+      - "${JSS_EXTERNAL_PORT:-3000}:${JSS_INTERNAL_PORT:-3000}"
+    volumes:
+      - ./docker/jss:/data
+      - jss_repo:/workspace
+      - ${JSS_CERTS_DIR:-./docker/certs}:/certs:ro
+
+volumes:
+  jss_repo:
