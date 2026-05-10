@@ -85,6 +85,163 @@ describe('turtle converter — unit (#320 follow-ups)', () => {
       `Turtle output must not contain object-stringification, got:\n${content}`);
   });
 
+  it('nested object with `id`/`type` aliases survives the conversion (#415)', async () => {
+    // Solid profiles use the JSON-LD 1.1 `id`/`type` aliases for
+    // nested resources (no `@`). The converter must accept both
+    // forms — without this, a CID v1 verificationMethod object
+    // gets silently dropped:
+    //   - the `cid:verificationMethod` predicate isn't emitted
+    //   - the nested `#nostr-key-1` resource (Multikey, controller,
+    //     publicKeyMultibase) isn't emitted either
+    // Net: third-party Turtle consumers see `cid:authentication
+    // <#nostr-key-1>` with no description of `#nostr-key-1`.
+    const doc = {
+      '@context': {
+        cid: 'https://www.w3.org/ns/cid/v1#',
+        verificationMethod: { '@id': 'cid:verificationMethod', '@container': '@set' },
+        authentication: { '@id': 'cid:authentication', '@type': '@id', '@container': '@set' },
+        controller: { '@id': 'cid:controller', '@type': '@id' },
+        publicKeyMultibase: { '@id': 'cid:publicKeyMultibase' },
+      },
+      '@id': 'https://example.test/profile/card.jsonld#me',
+      verificationMethod: [{
+        // Aliases — `id`/`type`, not `@id`/`@type`.
+        id: 'https://example.test/profile/card.jsonld#k',
+        type: 'Multikey',
+        controller: 'https://example.test/profile/card.jsonld#me',
+        publicKeyMultibase: 'fe70102de7ec',
+      }],
+      authentication: ['https://example.test/profile/card.jsonld#k'],
+    };
+    const { content } = await fromJsonLd(doc, 'text/turtle', 'https://example.test/', true);
+
+    // The cid:verificationMethod predicate must connect #me to the VM.
+    assert.match(content, /cid:verificationMethod|<https:\/\/www\.w3\.org\/ns\/cid\/v1#verificationMethod>/,
+      `cid:verificationMethod predicate missing from Turtle:\n${content}`);
+    // The VM resource must be described — its type, controller, key.
+    assert.ok(content.includes('https://example.test/profile/card.jsonld#k'),
+      `VM #k must appear in Turtle:\n${content}`);
+    assert.match(content, /Multikey|<https:\/\/www\.w3\.org\/ns\/cid\/v1#Multikey>/,
+      `Multikey type missing from Turtle:\n${content}`);
+    assert.ok(content.includes('fe70102de7ec'),
+      `publicKeyMultibase value missing from Turtle:\n${content}`);
+    assert.match(content, /cid:controller|<https:\/\/www\.w3\.org\/ns\/cid\/v1#controller>/,
+      `cid:controller predicate missing on the VM:\n${content}`);
+  });
+
+  it('malformed `id`/`type` values are silently dropped, not crashed on (#415 review)', async () => {
+    // Profiles in the wild can have malformed user-authored content
+    // — e.g. `id: 42` or `type: null`. The converter must NOT throw
+    // (downstream `resolveUri.startsWith` and `expandUri.includes`
+    // assume strings); it should treat the malformed value as absent
+    // and skip the affected resource cleanly.
+    const doc = {
+      '@context': { 'cid': 'https://www.w3.org/ns/cid/v1#' },
+      '@id': 'https://example.test/s',
+      // Nested object with a non-string `id` — must not crash.
+      'cid:bad1': { id: 42, 'cid:foo': 'x' },
+      // Nested object with a null `type` — must not crash.
+      'cid:bad2': { id: 'https://example.test/n2', type: null, 'cid:foo': 'x' },
+      // Array `type` with mixed string/non-string entries — string
+      // entries should still emit.
+      'cid:mixed': { id: 'https://example.test/n3', type: ['Multikey', 42, null], 'cid:foo': 'x' },
+    };
+    const { content } = await fromJsonLd(doc, 'text/turtle', 'https://example.test/', true);
+    assert.ok(typeof content === 'string', 'must produce a string output, not throw');
+    // The valid string type entry should survive in the mixed-type case.
+    assert.ok(content.includes('https://example.test/n3'),
+      `node n3 should appear:\n${content}`);
+  });
+
+  it('emits a space before `;` and `.` terminators (#419)', async () => {
+    // The de-facto convention in W3C spec examples and Apache Jena
+    // RIOT is to separate the statement-terminator from the previous
+    // token by a space. n3.js packs them; JSS post-processes the
+    // output to add the space.
+    //
+    // Use TWO predicates on the same subject so n3.js emits a `;`
+    // continuation (multiple triples on one subject). If a future
+    // N3 upgrade ever switched to "one triple per statement" style
+    // and dropped `;` entirely, this test would otherwise pass
+    // vacuously. The presence-of-terminator assertions below pin
+    // that behavior.
+    const doc = {
+      '@context': { 'foaf': 'http://xmlns.com/foaf/0.1/' },
+      '@id': 'https://example.test/alice',
+      'foaf:name': 'Alice',
+      'foaf:age': 30,
+    };
+    const { content } = await fromJsonLd(doc, 'text/turtle', 'https://example.test/', true);
+    // Pin "at least one ` ;` and one ` .` exists" with a literal
+    // SPACE — not just any whitespace. The intended output style
+    // (matching W3C Turtle 1.1 spec examples) is a single space
+    // separator: `value ;` / `value .`. Allowing `\n;` or `\t;`
+    // would let the test pass on visually-different output.
+    assert.match(content, / ;/, `output must contain at least one " ;" terminator (space-prefixed), got:\n${content}`);
+    assert.match(content, / \.(?:\s|$)/, `output must contain at least one " ." terminator (space-prefixed), got:\n${content}`);
+    // Every `;` must be preceded by a literal space. Same for `.`
+    // at end-of-statement. Reject anything else (newline, tab,
+    // packed-against-token).
+    const offendingSemi = /[^ ];/.test(content);
+    const offendingDot = /[^ ]\.\s*$/m.test(content) || /[^ ]\.\n/.test(content);
+    assert.ok(!offendingSemi, `every ; must be preceded by a single space, got:\n${content}`);
+    assert.ok(!offendingDot, `every . at line/doc end must be preceded by a single space, got:\n${content}`);
+  });
+
+  it('does NOT add a space inside literals containing `;` or `.` (#419 safety)', async () => {
+    // Critical correctness test: the post-pass must NOT corrupt
+    // literal values. A literal "foo;bar" with the post-pass naïvely
+    // applied would become "foo ;bar" — silent data corruption.
+    //
+    // Assert by VALUE, not by lexical form. A quote-agnostic parser
+    // round-trip survives any future N3 writer style change
+    // (single vs double quotes, long-string `"""..."""`, etc.).
+    const doc = {
+      '@context': { 'ex': 'https://example.test/ns#' },
+      '@id': 'https://example.test/s',
+      'ex:semicolonInside': 'foo;bar',
+      'ex:dotInside': 'has.dot',
+      'ex:both': 'a;b.c',
+    };
+    const { content } = await fromJsonLd(doc, 'text/turtle', 'https://example.test/', true);
+    // Round-trip: parse the emitted Turtle, walk the quads, assert
+    // the literal values came back exactly as authored.
+    const { Parser } = await import('n3');
+    const parser = new Parser({ baseIRI: 'https://example.test/' });
+    const quads = parser.parse(content);
+    const objectsByPredicate = new Map();
+    for (const q of quads) {
+      if (q.object.termType !== 'Literal') continue;
+      objectsByPredicate.set(q.predicate.value, q.object.value);
+    }
+    assert.strictEqual(objectsByPredicate.get('https://example.test/ns#semicolonInside'), 'foo;bar',
+      `literal value for ex:semicolonInside must be "foo;bar"`);
+    assert.strictEqual(objectsByPredicate.get('https://example.test/ns#dotInside'), 'has.dot',
+      `literal value for ex:dotInside must be "has.dot"`);
+    assert.strictEqual(objectsByPredicate.get('https://example.test/ns#both'), 'a;b.c',
+      `literal value for ex:both must be "a;b.c"`);
+  });
+
+  it('does NOT add a space inside an IRI containing `;` (#419 safety)', async () => {
+    // An IRI's content is bracketed by `<...>` — the post-pass
+    // shouldn't touch what's inside. Assert by value via parser
+    // round-trip so we don't depend on N3 writer formatting.
+    const doc = {
+      '@context': { 'ex': 'https://example.test/ns#' },
+      '@id': 'https://example.test/s',
+      'ex:rel': { '@id': 'https://example.test/path;with;semis' },
+    };
+    const { content } = await fromJsonLd(doc, 'text/turtle', 'https://example.test/', true);
+    const { Parser } = await import('n3');
+    const parser = new Parser({ baseIRI: 'https://example.test/' });
+    const quads = parser.parse(content);
+    const rels = quads
+      .filter(q => q.predicate.value === 'https://example.test/ns#rel')
+      .map(q => q.object.value);
+    assert.deepStrictEqual(rels, ['https://example.test/path;with;semis'],
+      `IRI value must round-trip with internal ; intact`);
+  });
+
   it('cyclical nested node reference does not hang', async () => {
     // Two nested nodes reference each other. BFS must not loop.
     const a = { '@id': 'https://example.test/a', 'ex:knows': null };
