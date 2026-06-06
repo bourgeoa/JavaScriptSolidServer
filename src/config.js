@@ -46,6 +46,13 @@ export const defaults = {
   // Git HTTP backend
   git: false,
 
+  // CORS proxy (#378) — pod-hosted, WAC-gated proxy for browser apps to
+  // fetch arbitrary upstreams that don't return CORS headers.
+  corsProxy: false,
+  corsProxyMaxBytes: 50 * 1024 * 1024, // 50 MB ceiling on upstream response size
+  corsProxyTimeoutMs: 30_000,           // 30 s deadline for upstream to send headers (504 if exceeded). The timeout does not apply during body streaming — body size is capped by corsProxyMaxBytes; see follow-up for streaming-phase timeout.
+  corsProxyMaxRedirects: 5,             // each redirect re-validated for SSRF
+
   // Nostr relay
   nostr: false,
   nostrPath: '/relay',
@@ -85,6 +92,12 @@ export const defaults = {
   // is not yet loggable until a password is set).
   singleUserPassword: null,
 
+  // Provision a Schnorr secp256k1 owner key on pod creation, written
+  // to <pod>/private/privkey.jsonld in W3C CID v1.0 Multikey format
+  // (Phase 1 of #437). Off by default — keys-on-disk is a security
+  // tradeoff and we want operators to opt in deliberately.
+  provisionKeys: false,
+
   // WebID-TLS client certificate authentication
   webidTls: false,
 
@@ -113,6 +126,9 @@ export const defaults = {
   mongo: false,
   mongoUrl: 'mongodb://localhost:27017',
   mongoDatabase: 'solid',
+
+  // MCP (Model Context Protocol) server — pod as a tool surface for agents (#490)
+  mcp: false,
 
   // Logging
   logger: true,
@@ -147,6 +163,10 @@ const envMap = {
   JSS_MASHLIB_VERSION: 'mashlibVersion',
   JSS_MASHLIB_MODULE: 'mashlibModule',
   JSS_GIT: 'git',
+  JSS_CORS_PROXY: 'corsProxy',
+  JSS_CORS_PROXY_MAX_BYTES: 'corsProxyMaxBytes',
+  JSS_CORS_PROXY_TIMEOUT_MS: 'corsProxyTimeoutMs',
+  JSS_CORS_PROXY_MAX_REDIRECTS: 'corsProxyMaxRedirects',
   JSS_NOSTR: 'nostr',
   JSS_NOSTR_PATH: 'nostrPath',
   JSS_NOSTR_MAX_EVENTS: 'nostrMaxEvents',
@@ -164,6 +184,7 @@ const envMap = {
   JSS_SINGLE_USER: 'singleUser',
   JSS_SINGLE_USER_NAME: 'singleUserName',
   JSS_SINGLE_USER_PASSWORD: 'singleUserPassword',
+  JSS_PROVISION_KEYS: 'provisionKeys',
   JSS_WEBID_TLS: 'webidTls',
   JSS_DEFAULT_QUOTA: 'defaultQuota',
   JSS_PUBLIC: 'public',
@@ -179,6 +200,7 @@ const envMap = {
   JSS_MONGO: 'mongo',
   JSS_MONGO_URL: 'mongoUrl',
   JSS_MONGO_DATABASE: 'mongoDatabase',
+  JSS_MCP: 'mcp',
 };
 
 /**
@@ -208,6 +230,7 @@ const BOOLEAN_KEYS = new Set([
   'mashlib',
   'mashlibCdn',
   'git',
+  'corsProxy',
   'nostr',
   'webrtc',
   'terminal',
@@ -216,12 +239,14 @@ const BOOLEAN_KEYS = new Set([
   'inviteOnly',
   'multiuser',
   'singleUser',
+  'provisionKeys',
   'webidTls',
   'public',
   'readOnly',
   'liveReload',
   'pay',
   'mongo',
+  'mcp',
   'idp',
   'notifications',
   'logger',
@@ -243,7 +268,13 @@ function parseEnvValue(value, key) {
   }
 
   // Numeric values for known numeric keys
-  if ((key === 'port' || key === 'nostrMaxEvents' || key === 'payCost' || key === 'payRate') && !isNaN(value)) {
+  if ((key === 'port' ||
+       key === 'nostrMaxEvents' ||
+       key === 'payCost' ||
+       key === 'payRate' ||
+       key === 'corsProxyMaxBytes' ||
+       key === 'corsProxyTimeoutMs' ||
+       key === 'corsProxyMaxRedirects') && !isNaN(value)) {
     return parseInt(value, 10);
   }
 

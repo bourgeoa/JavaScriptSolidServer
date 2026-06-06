@@ -10,7 +10,8 @@ import {
   canAcceptInput,
   toJsonLd,
   fromJsonLd,
-  RDF_TYPES
+  RDF_TYPES,
+  getVaryHeader
 } from '../rdf/conneg.js';
 import { emitChange } from '../notifications/events.js';
 import { checkIfMatch, checkIfNoneMatchForGet, checkIfNoneMatchForWrite } from '../utils/conditional.js';
@@ -27,6 +28,14 @@ const LIVE_RELOAD_SCRIPT = `<script>(function(){var ws=new WebSocket((location.p
 // across auth-state changes (WAC) and closes the mashlib render-race window
 // where a cached data variant was served on top-level navigation (#315).
 const RDF_CACHE_CONTROL = 'private, no-cache, must-revalidate';
+
+// Detects when the request's Accept header explicitly names a JSON
+// media type. Used by the container/index.html branches of GET and HEAD
+// to decide whether to surface the embedded JSON-LD data island —
+// without this guard, selectContentType's `*/*` arm would divert plain
+// browser requests into the RDF branch (#409). Hoisted so GET and HEAD
+// can't drift apart silently.
+const EXPLICIT_JSON_RE = /\b(application\/ld\+json|application\/json)\b/i;
 
 /**
  * Inject live reload script into HTML content
@@ -112,6 +121,22 @@ function parseRangeHeader(rangeHeader, fileSize) {
 }
 
 /**
+ * Compute a content-type-aware ETag. When mashlib will wrap an RDF
+ * resource in HTML, the response body differs from the raw resource,
+ * so the ETag must differ too — otherwise browsers confuse cached
+ * JSON-LD with the HTML variant despite Vary: Accept (#456).
+ */
+function getMashlibEtag(request, stats, storagePath) {
+  const storedType = stats.isDirectory ? 'application/ld+json' : getContentType(storagePath);
+  const willServeMashlib =
+    shouldServeMashlib(request, request.mashlibEnabled, storedType);
+  const effectiveEtag = willServeMashlib
+    ? stats.etag.replace(/"$/, '-html"')
+    : stats.etag;
+  return { willServeMashlib, effectiveEtag };
+}
+
+/**
  * Handle GET request
  */
 export async function handleGet(request, reply) {
@@ -126,26 +151,19 @@ export async function handleGet(request, reply) {
     return reply.code(404).send({ error: 'Not Found' });
   }
 
-  // Check If-None-Match for conditional GET (304 Not Modified).
-  // Important: don't short-circuit likely mashlib navigation requests,
-  // otherwise a top-level navigation can reuse a previously cached RDF
-  // variant (e.g., Turtle from mashlib XHR) and display raw text.
-  const ifNoneMatch = request.headers['if-none-match'];
-  if (ifNoneMatch) {
-    const decisionContentType = stats.isDirectory
-      ? 'application/ld+json'
-      : getContentType(storagePath);
-    const mashlibDecision = getMashlibDecision(
-      request,
-      request.mashlibEnabled,
-      decisionContentType
-    );
+  const { willServeMashlib, effectiveEtag } = getMashlibEtag(request, stats, storagePath);
 
-    if (!mashlibDecision.serve) {
-      const check = checkIfNoneMatchForGet(ifNoneMatch, stats.etag);
-      if (!check.ok && check.notModified) {
-        return reply.code(304).send();
-      }
+  // For non-containers, check If-None-Match early using the effective
+  // ETag. For containers, defer the check until we know which branch
+  // (index.html vs listing vs mashlib) will run — each uses a
+  // different ETag source (#456).
+  const ifNoneMatch = request.headers['if-none-match'];
+  if (ifNoneMatch && !stats.isDirectory) {
+    const check = checkIfNoneMatchForGet(ifNoneMatch, effectiveEtag);
+    if (!check.ok && check.notModified) {
+      reply.header('ETag', effectiveEtag);
+      reply.header('Vary', getVaryHeader(request.connegEnabled, request.mashlibEnabled));
+      return reply.code(304).send();
     }
   }
 
@@ -164,6 +182,17 @@ export async function handleGet(request, reply) {
       const content = await storage.read(indexPath);
       const indexStats = await storage.stat(indexPath);
 
+      // Deferred 304 check for index.html containers (#456)
+      const indexEtag = indexStats?.etag || stats.etag;
+      if (ifNoneMatch) {
+        const check = checkIfNoneMatchForGet(ifNoneMatch, indexEtag);
+        if (!check.ok && check.notModified) {
+          reply.header('ETag', indexEtag);
+          reply.header('Vary', getVaryHeader(connegEnabled, request.mashlibEnabled));
+          return reply.code(304).send();
+        }
+      }
+
       // Pick the negotiated RDF type using q-aware Accept parsing. The
       // naive `acceptHeader.includes('text/turtle')` we used to do here
       // ignored q-weights — `Accept: application/ld+json, text/turtle;q=0.1`
@@ -175,7 +204,16 @@ export async function handleGet(request, reply) {
       const wantsTurtle = negotiated === RDF_TYPES.TURTLE
         || negotiated === RDF_TYPES.N3
         || negotiated === 'application/n-triples';
-      const wantsJsonLd = negotiated === RDF_TYPES.JSON_LD;
+      // Only treat as JSON-LD when Accept *explicitly* asks for JSON.
+      // selectContentType doesn't recognize text/html or
+      // application/xhtml+xml, so for a browser Accept like
+      // `text/html, application/xhtml+xml, application/xml;q=0.9, */*;q=0.8`
+      // it walks past those unsupported types and lands on `*/*`, which
+      // returns JSON-LD — diverting plain browser GETs into the RDF
+      // branch and serving the embedded data island instead of the
+      // index.html body. Mirrors the HEAD-handler logic below (#409).
+      const explicitJson = EXPLICIT_JSON_RE.test(acceptHeader);
+      const wantsJsonLd = negotiated === RDF_TYPES.JSON_LD && explicitJson;
 
       if (wantsTurtle || wantsJsonLd) {
         // Extract JSON-LD from HTML data island
@@ -248,6 +286,16 @@ export async function handleGet(request, reply) {
     }
 
     // No index.html, return JSON-LD container listing
+    // Deferred 304 check for container listings (#456)
+    if (ifNoneMatch) {
+      const check = checkIfNoneMatchForGet(ifNoneMatch, effectiveEtag);
+      if (!check.ok && check.notModified) {
+        reply.header('ETag', effectiveEtag);
+        reply.header('Vary', getVaryHeader(connegEnabled, request.mashlibEnabled));
+        return reply.code(304).send();
+      }
+    }
+
     const entries = await storage.listContainer(storagePath);
     const jsonLd = generateContainerJsonLd(resourceUrl, entries || []);
 
@@ -271,7 +319,7 @@ export async function handleGet(request, reply) {
         );
       const headers = getAllHeaders({
         isContainer: true,
-        etag: stats.etag,
+        etag: effectiveEtag,
         contentType: 'text/html',
         origin,
         resourceUrl,
@@ -409,7 +457,7 @@ export async function handleGet(request, reply) {
       );
     const headers = getAllHeaders({
       isContainer: false,
-      etag: stats.etag,
+      etag: effectiveEtag,
       contentType: 'text/html',
       origin,
       resourceUrl,
@@ -594,6 +642,8 @@ export async function handleHead(request, reply) {
   const origin = request.headers.origin;
   const connegEnabled = request.connegEnabled || false;
   let contentType;
+  let headEtag = stats.etag;
+  let isMashlibResponse = false;
 
   if (stats.isDirectory) {
     const indexPath = storagePath.endsWith('/') ? `${storagePath}index.html` : `${storagePath}/index.html`;
@@ -614,10 +664,7 @@ export async function handleHead(request, reply) {
       if (wantsTurtle) {
         contentType = 'text/turtle';
       } else if (wantsJsonLd) {
-        // For an index.html container, only override to JSON-LD if the
-        // Accept header explicitly asked for JSON; otherwise fall back
-        // to text/html so HEAD matches the index.html that GET serves.
-        const explicitJson = /\b(application\/ld\+json|application\/json)\b/i.test(acceptHeader);
+        const explicitJson = EXPLICIT_JSON_RE.test(acceptHeader);
         contentType = (indexExists && !explicitJson) ? 'text/html' : 'application/ld+json';
       } else {
         contentType = indexExists ? 'text/html' : 'application/ld+json';
@@ -627,20 +674,48 @@ export async function handleHead(request, reply) {
     } else {
       contentType = 'application/ld+json';
     }
+
+    if (indexExists) {
+      // Mirror GET: containers with index.html use the index file's ETag
+      const indexStats = await storage.stat(indexPath);
+      headEtag = indexStats?.etag || stats.etag;
+    } else if (shouldServeMashlib(request, request.mashlibEnabled, 'application/ld+json')) {
+      // Container listing via mashlib — suffix the ETag (#456)
+      headEtag = stats.etag.replace(/"$/, '-html"');
+      contentType = 'text/html';
+      isMashlibResponse = true;
+    }
   } else {
-    contentType = getContentType(storagePath);
+    const { willServeMashlib, effectiveEtag } = getMashlibEtag(request, stats, storagePath);
+    headEtag = effectiveEtag;
+    isMashlibResponse = willServeMashlib;
+    contentType = willServeMashlib ? 'text/html' : getContentType(storagePath);
+  }
+
+  // Check If-None-Match using the final ETag (#456)
+  const ifNoneMatch = request.headers['if-none-match'];
+  if (ifNoneMatch) {
+    const check = checkIfNoneMatchForGet(ifNoneMatch, headEtag);
+    if (!check.ok && check.notModified) {
+      reply.header('ETag', headEtag);
+      reply.header('Vary', getVaryHeader(connegEnabled, request.mashlibEnabled));
+      return reply.code(304).send();
+    }
   }
 
   const headers = getAllHeaders({
     isContainer: stats.isDirectory,
-    etag: stats.etag,
+    etag: headEtag,
     contentType,
     origin,
     resourceUrl,
-    connegEnabled
+    connegEnabled,
+    mashlibEnabled: request.mashlibEnabled
   });
 
-  if (!stats.isDirectory) {
+  // Content-Length: only set when the file size matches the response body.
+  // Mashlib HTML and containers are dynamically generated.
+  if (!stats.isDirectory && !isMashlibResponse) {
     headers['Content-Length'] = stats.size;
   }
 

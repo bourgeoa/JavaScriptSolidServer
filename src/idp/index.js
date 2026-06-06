@@ -11,7 +11,7 @@ import {
   handleLogin,
   handleConsent,
   handleAbort,
-  handleRelogin,
+  handleSwitchAccount,
   handleRegisterGet,
   handleRegisterPost,
   handlePasskeyComplete,
@@ -23,19 +23,35 @@ import {
   handleCredentials,
   handleCredentialsInfo,
   handleChangePassword,
+  handleDeleteAccount,
+  handleAccountDeleteForm,
+  setNoCacheClickjackHeaders,
 } from './credentials.js';
+import { handleExportAccount } from './export.js';
 import * as passkey from './passkey.js';
 import { addTrustedIssuer } from '../auth/solid-oidc.js';
-import { landingPage } from './views.js';
+import { landingPage, accountDeletePage } from './views.js';
 
 /**
  * IdP Fastify Plugin
  * @param {FastifyInstance} fastify
  * @param {object} options
  * @param {string} options.issuer - The issuer URL
+ * @param {boolean} [options.inviteOnly=false] - If true, /idp/register
+ *   requires a valid invite code; public registration is disabled.
+ * @param {boolean} [options.singleUser=false] - Single-user mode.
+ *   Disables /idp/register and /idp/account DELETE; gates the
+ *   single-user branch in /idp/account/export.
+ * @param {string|null} [options.singleUserName=null] - Single-user
+ *   pod name. null → root pod (podDir = dataRoot); string → pod
+ *   lives at <dataRoot>/<name>/. Threaded into /idp/account/export
+ *   so the handler can resolve podDir + apply ROOT_POD_EXCLUDE.
+ * @param {string} [options.jssVersion] - Server version, written
+ *   into the export manifest for forensic / "what server made this"
+ *   purposes. Defaults to 'unknown' inside the export handler.
  */
 export async function idpPlugin(fastify, options) {
-  const { issuer, inviteOnly = false, singleUser = false } = options;
+  const { issuer, inviteOnly = false, singleUser = false, singleUserName = null, jssVersion } = options;
 
   if (!issuer) {
     throw new Error('IdP requires issuer URL');
@@ -279,6 +295,79 @@ export async function idpPlugin(fastify, options) {
     return handleChangePassword(request, reply);
   });
 
+  // DELETE account - authenticated owner deletes their own account (#352).
+  // Single-user mode is rejected at the handler (deletion would leave the
+  // server with no IDP account until re-seed; CLI is the operator path).
+  fastify.delete('/idp/account', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+        keyGenerator: (request) => request.ip
+      }
+    }
+  }, async (request, reply) => {
+    return handleDeleteAccount(request, reply, { singleUser });
+  });
+
+  // GET account export — authenticated owner downloads their pod tree as
+  // a streamed tar.gz (#353). MVP slice of the Credible Exit ladder
+  // (#448). Lighter rate-limit than the destructive endpoints — this is
+  // a read, but a heavy one (entire pod), so cap at 3/min to deter
+  // abuse without blocking a legitimate operator pulling a backup.
+  //
+  // Keyed by IP, consistent with the other /idp/ endpoints. We can't
+  // honestly key by WebID here: the global auth hook in src/server.js
+  // skips /idp/* (so request.webId is unset at this phase) and the
+  // rate-limit keyGenerator is sync, so we can't await token
+  // verification inline. Per-user keying is a follow-up that needs
+  // a preParsing hook resolving auth before the limiter runs.
+  fastify.get('/idp/account/export', {
+    config: {
+      rateLimit: {
+        max: 3,
+        timeWindow: '1 minute',
+        keyGenerator: (request) => request.ip
+      }
+    }
+  }, async (request, reply) => {
+    return handleExportAccount(request, reply, {
+      singleUser,
+      singleUserName,
+      jssVersion,
+    });
+  });
+
+  // GET account-delete form (#392) - human-friendly UI for #352. Public
+  // unauthenticated page; auth happens at form submission via password.
+  // Single-user mode returns 403 to stay consistent with /idp/register's
+  // disabled-route policy and the JSON DELETE /idp/account endpoint
+  // (which also 403s in single-user mode). Body is still HTML so a
+  // browser visitor sees the explanation. Every response sets
+  // anti-clickjacking + no-store headers — destructive-action page.
+  fastify.get('/idp/account/delete', async (request, reply) => {
+    setNoCacheClickjackHeaders(reply);
+    if (singleUser) {
+      return reply.code(403).type('text/html').send(accountDeletePage({ singleUser: true }));
+    }
+    return reply.type('text/html').send(accountDeletePage({ singleUser: false }));
+  });
+
+  // POST account-delete form (#392) - processes the form submission.
+  // Same rate-limit as the JSON endpoint to keep the destructive-action
+  // surface consistent across both paths.
+  fastify.post('/idp/account/delete', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+        keyGenerator: (request) => request.ip
+      }
+    }
+  }, async (request, reply) => {
+    return handleAccountDeleteForm(request, reply, { singleUser });
+  });
+
   // Interaction routes (our custom login/consent UI)
   // These bypass oidc-provider and use our handlers
 
@@ -325,9 +414,11 @@ export async function idpPlugin(fastify, options) {
     return handleAbort(request, reply, provider);
   });
 
-  // GET relogin - switch to a different account before consent
-  fastify.get('/idp/interaction/:uid/relogin', async (request, reply) => {
-    return handleRelogin(request, reply, provider);
+  // POST "Sign in as a different user" (#384) — destroys the OIDC
+  // session and bounces back to the login prompt while preserving the
+  // in-flight authz request.
+  fastify.post('/idp/interaction/:uid/switch', async (request, reply) => {
+    return handleSwitchAccount(request, reply, provider);
   });
 
   // Registration routes (disabled in single-user mode)

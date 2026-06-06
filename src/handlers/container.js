@@ -3,7 +3,8 @@ import { initializeQuota, checkQuota, updateQuotaUsage } from '../storage/quota.
 import { getAllHeaders } from '../ldp/headers.js';
 import { isContainer, getEffectiveUrlPath, getPodName } from '../utils/url.js';
 import { generateProfile, generatePreferences, generateTypeIndex, serialize } from '../webid/profile.js';
-import { generateOwnerAcl, generatePrivateAcl, generateInboxAcl, generatePublicFolderAcl, serializeAcl } from '../wac/parser.js';
+import { generateOwnerAcl, generatePrivateAcl, generateInboxAcl, generatePublicFolderAcl, serializeAcl, relativizeOwnerWebId } from '../wac/parser.js';
+import { provisionOwnerKey, assertProvisionKeysCompatible } from '../keys/provision.js';
 import { createToken } from '../auth/token.js';
 import { canAcceptInput, toJsonLd, RDF_TYPES } from '../rdf/conneg.js';
 import { emitChange } from '../notifications/events.js';
@@ -165,8 +166,19 @@ export async function handlePost(request, reply) {
  * @param {string} podUri - Pod root URI (e.g., https://alice.example.com/ or https://example.com/alice/)
  * @param {string} issuer - OIDC issuer URI
  * @param {number} defaultQuota - Default storage quota in bytes (optional)
+ * @param {object} [options]
+ * @param {boolean} [options.provisionKeys=false] - When true, generate a
+ *   Schnorr secp256k1 keypair and write it to `<pod>/private/privkey.jsonld`
+ *   in W3C CID v1.0 Multikey format. Phase 1 of #437. The secret lands on
+ *   disk in plaintext under owner-only WAC + file mode 0600 — operators
+ *   should add filesystem-level protection (FDE / OS keyring) for any pod
+ *   that matters.
+ * @returns {Promise<{ podPath, podUri, ownerKey?: { document, publicHex, secretHex, publicMultibase } }>}
+ *   When `provisionKeys` is true, the return value includes the freshly
+ *   minted key material so the caller can surface the public side in CLI
+ *   output (the secret should NOT be displayed or logged).
  */
-export async function createPodStructure(name, webId, podUri, issuer, defaultQuota = 0) {
+export async function createPodStructure(name, webId, podUri, issuer, defaultQuota = 0, options = {}) {
   const podPath = `/${name}/`;
 
   // Create pod directory structure
@@ -178,9 +190,20 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
   await storage.createContainer(`${podPath}settings/`);
   await storage.createContainer(`${podPath}profile/`);
 
-  // Generate and write WebID profile at /profile/card.jsonld
-  const profile = generateProfile({ webId, name, podUri, issuer });
-  await storage.write(`${podPath}profile/card.jsonld`, serialize(profile));
+  // Optional: provision a Schnorr secp256k1 owner key. The keypair is
+  // generated in memory up-front so its VM can be injected into the
+  // WebID profile that gets written last. The on-disk persistence of
+  // the secret is deferred to *after* the ACL tree is in place — see
+  // the ordering block further below. Strict `=== true` (not just
+  // truthy) so a misconfigured caller passing `'true'` / `1` / etc.
+  // doesn't silently activate; matches handleCreatePod's HTTP-side
+  // check on the body field.
+  const ownerKey = options.provisionKeys === true
+    ? provisionOwnerKey({ webId })
+    : null;
+
+  // Profile is written last (see the ACL/privkey block below). Skip
+  // the write here; we'll do it after privkey lands on disk.
 
   // Generate and write preferences
   const prefs = generatePreferences({ webId, podUri });
@@ -193,34 +216,42 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
   const privateTypeIndex = generateTypeIndex(`${podUri}settings/privateTypeIndex.jsonld`, { listed: false });
   await storage.write(`${podPath}settings/privateTypeIndex.jsonld`, serialize(privateTypeIndex));
 
-  // Create default ACL files
-  // Pod root: owner full control, public read
-  const rootAcl = generateOwnerAcl(podUri, webId, true);
+  // Create default ACL files. Each .acl is written inside the container it
+  // protects, so `acl:accessTo` is always './' (resolved against the .acl's
+  // own URL by the parser — see #428).
+  //
+  // The owner WebID is also written relatively (#430), derived from the
+  // absolute `webId` and the .acl's location within the pod by
+  // `relativizeOwnerWebId`. This works for any profile layout (modern
+  // `profile/card.jsonld#me`, legacy `profile/card#me`, custom shapes) and
+  // falls back to the absolute WebID for foreign owners. Together this
+  // keeps the on-disk pod portable across hostnames.
+  const owner = aclBase => relativizeOwnerWebId(webId, podUri, aclBase);
+
+  const rootAcl = generateOwnerAcl('./', owner(''), true);
   await storage.write(`${podPath}.acl`, serializeAcl(rootAcl));
 
-  // Private folder: owner only (no public)
-  const privateAcl = generatePrivateAcl(`${podUri}private/`, webId);
+  const privateAcl = generatePrivateAcl('./', owner('private/'));
   await storage.write(`${podPath}private/.acl`, serializeAcl(privateAcl));
 
-  // settings folder: owner only (contains private preferences)
-  const settingsAcl = generatePrivateAcl(`${podUri}settings/`, webId);
+  const settingsAcl = generatePrivateAcl('./', owner('settings/'));
   await storage.write(`${podPath}settings/.acl`, serializeAcl(settingsAcl));
 
-  // publicTypeIndex: public read, overrides the private default inherited from /settings/
-  const publicTypeIndexAcl = generateOwnerAcl(`${podUri}settings/publicTypeIndex.jsonld`, webId, false);
+  // publicTypeIndex: public read, overrides the private default inherited
+  // from /settings/. This is a resource ACL (lives at .../publicTypeIndex.jsonld.acl),
+  // whose base URL is /settings/ — same depth as `settings/.acl` for the
+  // owner reference.
+  const publicTypeIndexAcl = generateOwnerAcl('./publicTypeIndex.jsonld', owner('settings/'), false);
   await storage.write(`${podPath}settings/publicTypeIndex.jsonld.acl`, serializeAcl(publicTypeIndexAcl));
 
-  // Inbox: owner full, public append
-  const inboxAcl = generateInboxAcl(`${podUri}inbox/`, webId);
+  const inboxAcl = generateInboxAcl('./', owner('inbox/'));
   await storage.write(`${podPath}inbox/.acl`, serializeAcl(inboxAcl));
 
-  // Public folder: owner full, public read (with inheritance)
-  const publicAcl = generatePublicFolderAcl(`${podUri}public/`, webId);
+  const publicAcl = generatePublicFolderAcl('./', owner('public/'));
   await storage.write(`${podPath}public/.acl`, serializeAcl(publicAcl));
 
-  // Profile folder: owner full, public read (with inheritance)
   // Profile documents must be publicly readable for WebID verification
-  const profileAcl = generatePublicFolderAcl(`${podUri}profile/`, webId);
+  const profileAcl = generatePublicFolderAcl('./', owner('profile/'));
   await storage.write(`${podPath}profile/.acl`, serializeAcl(profileAcl));
 
   // Initialize storage quota if configured
@@ -228,7 +259,49 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
     await initializeQuota(name, defaultQuota);
   }
 
-  return { podPath, podUri };
+  // Owner-key persistence + profile write (when --provision-keys is on).
+  // Order is load-bearing for two distinct concerns (#444 review):
+  //
+  //   1. WAC vacuum: write privkey *after* the ACL tree is in place so
+  //      the secret file is born under owner-only WAC. Without this,
+  //      there's a window where the file exists but no /private/.acl
+  //      protects it; jss's deny-by-default since #f43ecdf would
+  //      mitigate to 401, but defence-in-depth beats relying on a
+  //      security default holding.
+  //
+  //   2. Orphan-VM: write privkey *before* the profile so a crash
+  //      between the two leaves an orphan secret file (easy to delete)
+  //      rather than an orphan VM in a published WebID profile that
+  //      forever advertises an authentication method whose secret was
+  //      never persisted.
+  //
+  // Combined: ACLs (above) → privkey (here) → profile (next).
+  if (ownerKey) {
+    const ok = await storage.write(
+      `${podPath}private/privkey.jsonld`,
+      JSON.stringify(ownerKey.document, null, 2),
+      { mode: 0o600 }
+    );
+    if (!ok) {
+      throw new Error(
+        `Failed to write owner key file at ${podPath}private/privkey.jsonld`
+      );
+    }
+  }
+
+  // Generate and write WebID profile at /profile/card.jsonld. When an
+  // owner key was provisioned, its VM lands in the profile so the
+  // existing LWS-CID verifier (src/auth/lws-cid.js) can authenticate
+  // JWTs signed with the matching secret. Profile is intentionally
+  // written last — see ordering rationale above.
+  const profile = generateProfile({ webId, name, podUri, issuer, ownerVm: ownerKey?.vm });
+  await storage.write(`${podPath}profile/card.jsonld`, serialize(profile));
+
+  // Spread `ownerKey` only when set so the field is genuinely absent
+  // (not `null`) on the no-provisioning path — matches the existing
+  // test expectation that `result.ownerKey === undefined` when the
+  // flag was omitted.
+  return { podPath, podUri, ...(ownerKey && { ownerKey }) };
 }
 
 /**
@@ -252,7 +325,7 @@ export async function handleCreatePod(request, reply) {
     return reply.code(405).send({ error: 'Method Not Allowed', message: 'Server is in read-only mode' });
   }
 
-  const { name, email, password } = request.body || {};
+  const { name, email, password, provisionKeys } = request.body || {};
   const idpEnabled = request.idpEnabled;
 
   if (!name || typeof name !== 'string') {
@@ -272,6 +345,25 @@ export async function handleCreatePod(request, reply) {
   // Validate pod name (alphanumeric, dash, underscore)
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
     return reply.code(400).send({ error: 'Invalid pod name. Use alphanumeric, dash, or underscore only.' });
+  }
+
+  // Refuse provisionKeys + --public: WAC would be bypassed, exposing the
+  // freshly written secret to anyone. Use the same assertion helper as
+  // createServer's startup-time check so the error message stays in
+  // one place — converted to a 400 here because we're in an HTTP
+  // request context, not the constructor.
+  if (provisionKeys === true) {
+    try {
+      assertProvisionKeysCompatible({
+        provisionKeys: true,
+        isPublic: !!request.config?.public
+      });
+    } catch (err) {
+      return reply.code(400).send({
+        error: 'provisionKeys cannot be used in --public mode',
+        message: err.message
+      });
+    }
   }
 
   const podPath = `/${name}/`;
@@ -303,9 +395,14 @@ export async function handleCreatePod(request, reply) {
   // Issuer needs trailing slash for CTH compatibility
   const issuer = baseUri + '/';
 
+  let podCreation;
   try {
-    // Use shared pod creation function
-    await createPodStructure(name, webId, podUri, issuer);
+    // Use shared pod creation function. Coerce provisionKeys to a
+    // strict boolean so a JSON `null` / missing value defaults to off.
+    podCreation = await createPodStructure(
+      name, webId, podUri, issuer, 0,
+      { provisionKeys: provisionKeys === true }
+    );
   } catch (err) {
     console.error('Pod creation error:', err);
     // Cleanup on failure
@@ -318,6 +415,16 @@ export async function handleCreatePod(request, reply) {
   headers['Location'] = podUri;
 
   Object.entries(headers).forEach(([k, v]) => reply.header(k, v));
+
+  // Surface a summary of any provisioned key so callers can display
+  // the public side. The secret is NEVER echoed in the response —
+  // it lives only on disk under the pod's owner-only ACL.
+  const keyInfo = podCreation?.ownerKey
+    ? {
+        keyDocument: `${podUri}private/privkey.jsonld`,
+        publicKeyMultibase: podCreation.ownerKey.publicMultibase
+      }
+    : null;
 
   // If IdP is enabled, create account and return token + login URL
   if (idpEnabled) {
@@ -333,6 +440,7 @@ export async function handleCreatePod(request, reply) {
         token,
         idpIssuer: issuer,
         loginUrl: `${baseUri}/idp/auth`,
+        ...(keyInfo && { ownerKey: keyInfo })
       });
     } catch (err) {
       console.error('Account creation error:', err);
@@ -349,6 +457,7 @@ export async function handleCreatePod(request, reply) {
     name,
     webId,
     podUri,
-    token
+    token,
+    ...(keyInfo && { ownerKey: keyInfo })
   });
 }

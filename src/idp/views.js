@@ -381,12 +381,21 @@ export function loginPage(uid, clientId, error = null, passkeyEnabled = true, sc
         // Sign with NIP-07 extension
         const signedEvent = await window.nostr.signEvent(event);
 
+        // Read the typed username so the server can resolve which
+        // account this Nostr key belongs to, in case the existing
+        // did:nostr DID-doc resolver doesn't have a binding yet.
+        // The signature is verified BEFORE the username is consulted —
+        // typing someone else's username doesn't grant access.
+        const typedUsername = (document.getElementById('username')?.value || '').trim();
+
         // Send to server
         const response = await fetch(authUrl, {
           method: 'POST',
           headers: {
-            'Authorization': 'Nostr ' + btoa(JSON.stringify(signedEvent))
-          }
+            'Authorization': 'Nostr ' + btoa(JSON.stringify(signedEvent)),
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: typedUsername ? 'username=' + encodeURIComponent(typedUsername) : ''
         });
 
         const result = await response.json();
@@ -503,7 +512,15 @@ export function consentPage(uid, client, params, account) {
       ${clientUri ? `<div class="client-uri">${escapeHtml(clientUri)}</div>` : ''}
     </div>
 
-    ${account ? `<p>Signed in as <strong>${escapeHtml(account.email)}</strong></p>` : ''}
+    ${account ? `
+      <div style="display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 12px 0;">
+        <span>Signed in as <strong>${escapeHtml(account.email)}</strong></span>
+        <span style="color: #94a3b8;">·</span>
+        <form method="POST" action="/idp/interaction/${uid}/switch" style="display: inline; margin: 0;">
+          <button type="submit" style="background: none; border: 0; padding: 0; color: #2563eb; font: inherit; cursor: pointer; text-decoration: underline;">Sign in as a different user</button>
+        </form>
+      </div>
+    ` : ''}
 
     <div class="scopes">
       <label>This app is requesting access to:</label>
@@ -521,6 +538,194 @@ export function consentPage(uid, client, params, account) {
         <button type="submit" class="btn btn-secondary">Deny</button>
       </form>
     </div>
+  </div>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Account-deletion form HTML (#392).
+ *
+ * Public unauthenticated page (matches the existing /idp landing and
+ * /idp/register pattern). Auth happens at submission time: the user
+ * supplies username + password, which the server validates and uses as
+ * proof-of-possession for the delete. The "type your username again to
+ * confirm" field is the destructive-action UX guard.
+ *
+ * On any failure (wrong password, mismatched confirmation, etc.) the
+ * handler re-renders this same form in place at status 200 with an
+ * error message and the identifier field pre-filled — no redirect.
+ *
+ * @param {object} opts
+ * @param {string|null} opts.error - Error message (e.g. wrong password) to display
+ * @param {string} opts.username - Pre-fill the identifier field on re-render after error
+ * @param {boolean} opts.singleUser - When true, render a disabled message
+ *   instead of the form. Deletion via HTTP is blocked in single-user mode
+ *   (would brick the IdP until re-seed); operator path stays the CLI.
+ * @param {boolean} opts.success - When true, render the post-delete confirmation
+ * @param {boolean} opts.purgeFailed - When true (only on success), include a
+ *   notice that the user requested a pod-data purge but it didn't complete.
+ *   Account deletion still succeeded.
+ */
+export function accountDeletePage({ error = null, username = '', singleUser = false, success = false, purgeFailed = false } = {}) {
+  if (singleUser) {
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account deletion disabled - Solid IdP</title>
+  <style>${styles}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">${solidLogo}</div>
+    <h1>Account deletion disabled</h1>
+    <p>This server runs in <strong>single-user mode</strong>. Deleting the single account
+       via HTTP would leave the server with no IdP account until re-seed,
+       so this endpoint is disabled.</p>
+    <p>The operator can still delete the account at the shell with:</p>
+    <pre style="background: #f1f5f9; padding: 12px; border-radius: 6px; font-size: 13px;">jss account delete &lt;username&gt;</pre>
+    <a href="/idp" class="btn btn-secondary" style="text-decoration: none;">Back</a>
+  </div>
+</body>
+</html>
+    `;
+  }
+
+  if (success) {
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account deleted - Solid IdP</title>
+  <style>${styles}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">${solidLogo}</div>
+    <h1>Account deleted</h1>
+    <p>Your account record has been removed from this server. Future sign-ins
+       with this username will fail.</p>
+    <p style="font-size: 13px; color: #64748b; margin-top: 8px;">
+      Note: any access tokens already issued may remain usable until they
+      expire — the server does not currently revoke them on account deletion.
+    </p>
+    ${purgeFailed ? `
+    <div class="error" style="margin-top: 16px;">
+      Your account was deleted, but the pod-data purge did not complete on
+      this server. Some files may still exist. Contact the operator to
+      finish the cleanup if needed.
+    </div>
+    ` : ''}
+    <a href="/idp" class="btn btn-primary" style="text-decoration: none; margin-top: 16px;">Return to sign-in</a>
+  </div>
+</body>
+</html>
+    `;
+  }
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delete account - Solid IdP</title>
+  <style>${styles}
+  .danger {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    padding: 14px 16px;
+    border-radius: 8px;
+    margin: 16px 0 24px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .danger strong { color: #7f1d1d; }
+  .btn-danger {
+    background: #dc2626;
+    color: #fff;
+  }
+  .btn-danger:hover { background: #b91c1c; }
+  .checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 16px 0 8px;
+    padding: 10px 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+  }
+  .checkbox-row input[type="checkbox"] { margin-top: 3px; flex-shrink: 0; }
+  .checkbox-row label {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #334155;
+    cursor: pointer;
+  }
+  .checkbox-row label strong { color: #0f172a; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">${solidLogo}</div>
+    <h1>Delete your account</h1>
+
+    <div class="danger">
+      <strong>This is permanent.</strong> Your account record and credentials will be
+      removed; future sign-ins with this username will fail. By default, your pod
+      data (every file you've stored, including your WebID profile document) is
+      also wiped — check the box below if you want to keep it. Federated references
+      (ActivityPub follows, Nostr relays, type indexes) cannot be retracted from
+      this server.
+      <br><br>
+      <span style="font-size: 12px; color: #7f1d1d;">
+        Note: access tokens already issued may remain usable until they
+        expire — the server does not currently revoke them on deletion.
+      </span>
+    </div>
+
+    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}
+
+    <form method="POST" action="/idp/account/delete">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required autofocus
+             value="${escapeHtml(username || '')}"
+             placeholder="alice">
+
+      <label for="currentPassword">Current password</label>
+      <input type="password" id="currentPassword" name="currentPassword" required
+             placeholder="Re-enter your password">
+
+      <label for="confirmUsername">Type your username again to confirm</label>
+      <input type="text" id="confirmUsername" name="confirmUsername" required
+             placeholder="Must match the username above">
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="keepData" name="keepData" value="on">
+        <label for="keepData">
+          <strong>Keep my pod data on this server.</strong> Check only if you want
+          to delete just your account record and leave your files in place. Default
+          (unchecked) wipes the pod folder along with the account.
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-danger" style="width: 100%; margin-top: 16px;">
+        Delete my account permanently
+      </button>
+    </form>
+
+    <p style="text-align: center; margin-top: 16px; font-size: 13px;">
+      <a href="/idp">Cancel and go back</a>
+    </p>
   </div>
 </body>
 </html>
@@ -622,7 +827,7 @@ export function landingPage(ctx = {}) {
       : '<a href="/idp/register" class="btn btn-primary" style="text-decoration: none;">Create Account</a>'}
 
     <div class="signin-note">
-      <strong>${singleUser ? 'Sign in' : 'Already have an account?'}</strong> ${singleUser ? 'from' : 'Sign in from'} a Solid app — for example, <a href="https://solid-apps.github.io/pilot/" target="_blank" rel="noopener">pilot</a> is a minimal console you can open right now. Point it at this server and click Sign In.
+      <strong>${singleUser ? 'Sign in' : 'Already have an account?'}</strong> ${singleUser ? 'from' : 'Sign in from'} a Solid app — for example, <a href="https://solid-apps.github.io/pilot/" target="_blank" rel="noopener">pilot</a> is a minimal console you can open right now. Point it at this server and click Sign In. Or <a href="https://solidproject.org/apps" target="_blank" rel="noopener">browse other Solid apps</a>.
     </div>
 
     ${issuer ? `<div class="issuer">Issuer: ${escapeHtml(issuer.replace(/\/$/, ''))}</div>` : ''}

@@ -47,6 +47,77 @@ describe('WebID Profile', () => {
       assert.ok(jsonLd['@id'], 'Should have @id');
     });
 
+    // LWS-CID document conformance, Phase A of #386. The profile must be
+    // structurally a W3C Controlled Identifier document so a future
+    // PATCH-in-keys app (or server migration) can drop verificationMethod
+    // entries in without further plumbing. CID v1 vocabulary is declared
+    // inline rather than via context URL so JSS's conneg layer can
+    // expand every term without fetching external contexts — the IRIs
+    // are the same either way.
+    it('declares all six CID v1 terms in @context (#386 Phase A)', async () => {
+      const res = await request(profilePath);
+      const jsonLd = await res.json();
+      const ctx = jsonLd['@context'];
+      assert.ok(ctx, '@context required');
+
+      // All six CID terms must be declared and expand to the CID v1
+      // namespace. Accept either prefixed (cid:term) or full-URI
+      // (https://www.w3.org/ns/cid/v1#term) form.
+      const cidTerms = ['controller', 'verificationMethod', 'authentication', 'assertionMethod', 'publicKeyJwk', 'publicKeyMultibase'];
+      for (const term of cidTerms) {
+        const mapping = ctx[term];
+        assert.ok(mapping, `@context must define \`${term}\``);
+        const id = typeof mapping === 'string' ? mapping : mapping['@id'];
+        assert.match(id, new RegExp(`^(cid:${term}|https://www\\.w3\\.org/ns/cid/v1#${term})$`),
+          `${term} must map to the CID v1 namespace`);
+      }
+
+      // Container/type flags Phase B relies on:
+      // verificationMethod values are inline objects, NOT IRIs — must
+      //   NOT have @type:@id (would force string-only) and SHOULD have
+      //   @container:@set so a single entry is still an array.
+      assert.notStrictEqual(ctx.verificationMethod['@type'], '@id',
+        'verificationMethod values are objects, not IRIs');
+      assert.strictEqual(ctx.verificationMethod['@container'], '@set');
+      // authentication / assertionMethod reference verificationMethod
+      // entries by IRI, so @type:@id is correct.
+      assert.strictEqual(ctx.authentication['@type'], '@id');
+      assert.strictEqual(ctx.assertionMethod['@type'], '@id');
+      // JWK is a literal JSON value (rdf:JSON datatype) per JSON-LD 1.1.
+      assert.strictEqual(ctx.publicKeyJwk['@type'], '@json');
+    });
+
+    it('declares CID v1 class names (Multikey, JsonWebKey) as flat aliases (#417)', async () => {
+      // Without these mappings, an app PATCHing in a VM with the
+      // spec-example shape `{type: "Multikey", ...}` produces a bare
+      // relative-IRI `<Multikey>` in the Turtle conneg output, which
+      // resolves to a fictional class on the pod's own host (e.g.
+      // `<pod>/profile/Multikey` instead of `cid:Multikey`).
+      //
+      // The flat-alias shape (`"Multikey": "cid:Multikey"`) makes
+      // bare-term emission work correctly through both JSON-LD
+      // expansion AND our Turtle conneg layer — and matches the
+      // "JSON-LD with flat context aliases" pattern consumers like
+      // LOSOS / LION rely on.
+      const res = await request(profilePath);
+      const jsonLd = await res.json();
+      const ctx = jsonLd['@context'];
+      for (const cls of ['Multikey', 'JsonWebKey']) {
+        const mapping = ctx[cls];
+        assert.ok(mapping, `@context must define class alias \`${cls}\``);
+        const id = typeof mapping === 'string' ? mapping : mapping['@id'];
+        assert.match(id, new RegExp(`^(cid:${cls}|https://www\\.w3\\.org/ns/cid/v1#${cls})$`),
+          `${cls} must map to the CID v1 namespace`);
+      }
+    });
+
+    it('declares self-control via controller === @id (#386 Phase A)', async () => {
+      const res = await request(profilePath);
+      const jsonLd = await res.json();
+      assert.strictEqual(jsonLd.controller, jsonLd['@id'],
+        'profile must declare itself as its own controller per CID v1');
+    });
+
     it('should have correct WebID URI', async () => {
       const res = await request(profilePath);
       const jsonLd = await res.json();
@@ -167,6 +238,59 @@ describe('WebID Profile — Turtle conneg (#320)', () => {
 
   after(async () => {
     await stopTestServer();
+  });
+
+  it('Turtle conneg: generated profile @context expands bare Multikey/JsonWebKey terms (#417)', async () => {
+    // Combine the production profile generator's @context with a
+    // synthetic VM (the spec-example shape `{type: "Multikey", ...}`)
+    // and run it through the same conneg path the live profile
+    // would. Asserts: the bare-term type expands to the CID v1
+    // namespace, not to a relative IRI that resolves to a fake
+    // class on the pod's host.
+    const { generateProfile } = await import('../src/webid/profile.js');
+    const { fromJsonLd } = await import('../src/rdf/conneg.js');
+    const webId = 'https://example.test/profile/card.jsonld#me';
+    const profile = generateProfile({
+      webId,
+      name: 'mk-test',
+      podUri: 'https://example.test/',
+      issuer: 'https://example.test/',
+    });
+    // Inject a Multikey VM authored with the spec-example bare-term
+    // type — this is the shape the bug surfaces on.
+    const vmId = webId.replace('#me', '#nostr-key-1');
+    profile.verificationMethod = [{
+      id: vmId,
+      type: 'Multikey',
+      controller: webId,
+      publicKeyMultibase: 'fe70102de7ec0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab',
+    }];
+    profile.authentication = [vmId];
+
+    const { content: ttl } = await fromJsonLd(profile, 'text/turtle', 'https://example.test/', true);
+
+    // Pre-#417: would emit `a <Multikey>` (relative — resolves to
+    // `https://example.test/profile/Multikey`).
+    // After #417: the @context maps `Multikey -> cid:Multikey`, so
+    // the converter expands the bare term to the CID v1 IRI.
+    assert.ok(
+      ttl.includes('cid:Multikey') || ttl.includes('cid/v1#Multikey'),
+      `Turtle must emit a CID-namespaced Multikey class, got:\n${ttl}`,
+    );
+    assert.ok(
+      !/\ba\s+<Multikey>\s*[;.]/.test(ttl),
+      `Turtle must NOT emit bare <Multikey> (resolves to fictional class), got:\n${ttl}`,
+    );
+    // Don't regress #416: the VM block + publicKeyMultibase must
+    // still survive the conversion.
+    assert.ok(
+      ttl.includes('publicKeyMultibase') || ttl.includes('cid/v1#publicKeyMultibase'),
+      `Turtle must include cid:publicKeyMultibase, got:\n${ttl}`,
+    );
+    assert.ok(
+      ttl.includes('fe70102de7ec'),
+      `Turtle must include the publicKeyMultibase value, got:\n${ttl}`,
+    );
   });
 
   it('Turtle variant includes cid:service with lws:OpenIdProvider and serviceEndpoint', async () => {

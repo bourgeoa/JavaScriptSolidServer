@@ -87,14 +87,16 @@ program
   .option('-c, --config <file>', 'Config file path')
   .option('--ssl-key <path>', 'Path to SSL private key (PEM)')
   .option('--ssl-cert <path>', 'Path to SSL certificate (PEM)')
-  .option('--multiuser', 'Enable multi-user mode')
-  .option('--no-multiuser', 'Disable multi-user mode')
+  .option('--multi-user', 'Enable multi-user mode')
+  .option('--no-multi-user', 'Disable multi-user mode')
   .option('--conneg', 'Enable content negotiation (Turtle support)')
   .option('--no-conneg', 'Disable content negotiation')
   .option('--notifications', 'Enable WebSocket notifications')
   .option('--no-notifications', 'Disable WebSocket notifications')
   .option('--idp', 'Enable built-in Identity Provider')
   .option('--no-idp', 'Disable built-in Identity Provider')
+  .option('--provision-keys', 'Generate a Schnorr secp256k1 owner key on pod creation, written to <pod>/private/privkey.jsonld in W3C CID v1.0 Multikey format (off by default)')
+  .option('--no-provision-keys', 'Do not auto-generate an owner key on pod creation')
   .option('--idp-issuer <url>', 'IdP issuer URL (defaults to server URL)')
   .option('--subdomains', 'Enable subdomain-based pods (XSS protection)')
   .option('--no-subdomains', 'Disable subdomain-based pods')
@@ -105,6 +107,11 @@ program
   .option('--mashlib-version <version>', 'Mashlib version for CDN mode (default: 2.0.0)')
   .option('--git', 'Enable Git HTTP backend (clone/push support)')
   .option('--no-git', 'Disable Git HTTP backend')
+  .option('--cors-proxy', 'Enable CORS proxy at /proxy?url=... for browser apps (WAC-gated)')
+  .option('--no-cors-proxy', 'Disable CORS proxy')
+  .option('--cors-proxy-max-bytes <n>', 'CORS proxy upstream response size cap (default 50MB)', parseInt)
+  .option('--cors-proxy-timeout-ms <ms>', 'CORS proxy upstream request timeout (default 30s)', parseInt)
+  .option('--cors-proxy-max-redirects <n>', 'CORS proxy max redirect hops, each re-validated (default 5)', parseInt)
   .option('--nostr', 'Enable Nostr relay')
   .option('--no-nostr', 'Disable Nostr relay')
   .option('--nostr-path <path>', 'Nostr relay WebSocket path (default: /relay)')
@@ -145,11 +152,19 @@ program
   .option('--no-mongo', 'Disable MongoDB-backed /db/ route')
   .option('--mongo-url <url>', 'MongoDB connection URL (default: mongodb://localhost:27017)')
   .option('--mongo-database <name>', 'MongoDB database name (default: solid)')
+  .option('--mcp', 'Enable MCP (Model Context Protocol) server at /mcp — pod as a tool surface for agents (#490)')
+  .option('--no-mcp', 'Disable MCP server')
   .option('-q, --quiet', 'Suppress log output')
   .option('--log-level <level>', 'Log level: error, warn, info, debug (default: info)')
   .option('--print-config', 'Print configuration and exit')
   .action(async (options) => {
     try {
+      // Normalize --multi-user (Commander camelCase: multiUser) to internal key
+      if (options.multiUser !== undefined) {
+        options.multiuser = options.multiUser;
+        delete options.multiUser;
+      }
+
       const config = await loadConfig(options, options.config);
 
       // Set DATA_ROOT env var so all modules use the same data directory
@@ -191,6 +206,10 @@ program
         mashlibVersion: config.mashlibVersion,
         mashlibModule: config.mashlibModule,
         git: config.git,
+        corsProxy: config.corsProxy,
+        corsProxyMaxBytes: config.corsProxyMaxBytes,
+        corsProxyTimeoutMs: config.corsProxyTimeoutMs,
+        corsProxyMaxRedirects: config.corsProxyMaxRedirects,
         nostr: config.nostr,
         nostrPath: config.nostrPath,
         nostrMaxEvents: config.nostrMaxEvents,
@@ -209,6 +228,7 @@ program
         singleUser: config.singleUser,
         singleUserName: config.singleUserName,
         singleUserPassword: config.singleUserPassword,
+        provisionKeys: config.provisionKeys,
         public: config.public,
         readOnly: config.readOnly,
         liveReload: config.liveReload,
@@ -222,6 +242,7 @@ program
         mongo: config.mongo,
         mongoUrl: config.mongoUrl,
         mongoDatabase: config.mongoDatabase,
+        mcp: config.mcp,
       });
 
       await server.listen({ port: config.port, host: config.host });
@@ -242,6 +263,7 @@ program
         }
         if (config.mashlibModule) console.log(`  Mashlib module: ${config.mashlibModule}`);
         if (config.git) console.log('  Git: enabled (clone/push support)');
+        if (config.corsProxy) console.log('  CORS proxy: enabled (/proxy?url=..., WAC-gated)');
         if (config.nostr) console.log(`  Nostr: enabled (${config.nostrPath})`);
         if (config.webrtc) console.log(`  WebRTC: enabled (${config.webrtcPath || '/.webrtc'})`);
         if (config.terminal) console.log('  Terminal: enabled (/.terminal)');
@@ -290,6 +312,32 @@ program
 
     } catch (err) {
       console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * Install command — install a Solid app from the default registry
+ * (`github.com/solid-apps/<name>`) into a running pod.
+ *
+ * Phase 1 of #464 / scoped in #478. Hardcodes the default registry;
+ * later phases add <org>/<repo>, full URLs, refs, renames, did:nostr
+ * resolution, NIP-98 auth, curated default sets, and --bundle.
+ */
+program
+  .command('install [names...]')
+  .description('Install a Solid app (or a bundle of apps) into a running pod')
+  .option('--pod <url>', 'Target pod URL', 'http://localhost:4443')
+  .option('--user <name>', 'Username for IDP auth', 'me')
+  .option('--password <pw>', 'Password (default: $JSS_SINGLE_USER_PASSWORD or "me")')
+  .option('--nostr-privkey <hex>', 'Sign install pushes with NIP-98 using this 64-char hex Nostr privkey instead of fetching a bearer token (default: $NOSTR_PRIVKEY)')
+  .option('--bundle <source>', 'Install everything in a bundle (JSON-LD doc). Source: bare name → solid-apps/bundles, <org>/<repo>, https://..., or a local path')
+  .action(async (names, options) => {
+    try {
+      const { runInstall } = await import('../src/cli/install.js');
+      await runInstall(names, options);
+    } catch (err) {
+      // runInstall prints its own per-app error lines; we just exit non-zero.
       process.exit(1);
     }
   });
@@ -763,11 +811,15 @@ accountCmd
 
       if (options.purge) {
         const dataRoot = process.env.DATA_ROOT || './data';
-        const podPath = path.join(dataRoot, account.username);
+        // Use podName, not username — createAccount lowercases the
+        // username but pod directories on disk preserve the original
+        // case. On case-sensitive filesystems they can differ.
+        const podPath = path.join(dataRoot, account.podName || account.username);
         await fs.remove(podPath);
         console.log(`\nDeleted account ${account.username}. Pod data removed from ${podPath}.\n`);
       } else {
-        console.log(`\nDeleted account ${account.username}. Pod data preserved at <dataRoot>/${account.username}/ (use --purge to remove).\n`);
+        const podDir = account.podName || account.username;
+        console.log(`\nDeleted account ${account.username}. Pod data preserved at <dataRoot>/${podDir}/ (use --purge to remove).\n`);
       }
     } catch (err) {
       console.error(`Error: ${err.message}`);

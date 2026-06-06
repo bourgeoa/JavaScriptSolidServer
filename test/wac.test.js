@@ -13,7 +13,17 @@ import {
   assertHeader,
   getBaseUrl
 } from './helpers.js';
-import { parseAcl, AccessMode, generateOwnerAcl, serializeAcl } from '../src/wac/parser.js';
+import {
+  parseAcl,
+  AccessMode,
+  generateOwnerAcl,
+  generatePrivateAcl,
+  generateInboxAcl,
+  generatePublicFolderAcl,
+  generatePublicReadAcl,
+  serializeAcl,
+  relativizeOwnerWebId
+} from '../src/wac/parser.js';
 import { checkAccess, getRequiredMode } from '../src/wac/checker.js';
 
 describe('WAC Parser', () => {
@@ -238,6 +248,208 @@ describe('WAC Parser', () => {
       assert.ok(publicAuth);
     });
   });
+
+  // Phase 1 of #427 (#428): generators should preserve relative resourceUrls
+  // verbatim so callers can emit host-portable ACLs. The parser already
+  // resolves them at check time against the .acl's URL.
+  describe('relative resourceUrl portability (#428)', () => {
+    const webId = 'https://alice.example/profile/card.jsonld#me';
+
+    it('generateOwnerAcl preserves "./" in accessTo and default', () => {
+      const acl = generateOwnerAcl('./', webId, true);
+      const owner = acl['@graph'].find(a => a['@id'] === '#owner');
+      const pub = acl['@graph'].find(a => a['@id'] === '#public');
+      assert.strictEqual(owner['acl:accessTo']['@id'], './');
+      assert.strictEqual(owner['acl:default']['@id'], './');
+      assert.strictEqual(pub['acl:accessTo']['@id'], './');
+      // #public intentionally has no default — child resources require auth
+      assert.strictEqual(pub['acl:default'], undefined);
+    });
+
+    it('generatePrivateAcl preserves "./"', () => {
+      const acl = generatePrivateAcl('./', webId);
+      const owner = acl['@graph'][0];
+      assert.strictEqual(owner['acl:accessTo']['@id'], './');
+      assert.strictEqual(owner['acl:default']['@id'], './');
+    });
+
+    it('generateInboxAcl preserves "./"', () => {
+      const acl = generateInboxAcl('./', webId);
+      for (const auth of acl['@graph']) {
+        assert.strictEqual(auth['acl:accessTo']['@id'], './');
+        assert.strictEqual(auth['acl:default']['@id'], './');
+      }
+    });
+
+    it('generatePublicFolderAcl preserves "./"', () => {
+      const acl = generatePublicFolderAcl('./', webId);
+      for (const auth of acl['@graph']) {
+        assert.strictEqual(auth['acl:accessTo']['@id'], './');
+        assert.strictEqual(auth['acl:default']['@id'], './');
+      }
+    });
+
+    it('generatePublicReadAcl preserves a relative resource basename', () => {
+      const acl = generatePublicReadAcl('./publicTypeIndex.jsonld');
+      assert.strictEqual(
+        acl['@graph'][0]['acl:accessTo']['@id'],
+        './publicTypeIndex.jsonld'
+      );
+    });
+
+    // Phase 2 of #427 (#430): generators should also preserve a relative
+    // ownerWebId verbatim, so the on-disk pod is host-portable for the
+    // owner half of the rule too. The parser already resolves relative
+    // agents (PR #65 / #64) — this just exercises the writer side.
+    it('generateOwnerAcl preserves a relative ownerWebId (#430)', () => {
+      const acl = generateOwnerAcl('./', './profile/card.jsonld#me', true);
+      const owner = acl['@graph'].find(a => a['@id'] === '#owner');
+      assert.strictEqual(owner['acl:agent']['@id'], './profile/card.jsonld#me');
+    });
+
+    it('generatePrivateAcl preserves a relative ownerWebId (#430)', () => {
+      const acl = generatePrivateAcl('./', '../profile/card.jsonld#me');
+      assert.strictEqual(acl['@graph'][0]['acl:agent']['@id'], '../profile/card.jsonld#me');
+    });
+
+    it('generateInboxAcl preserves a relative ownerWebId (#430)', () => {
+      const acl = generateInboxAcl('./', '../profile/card.jsonld#me');
+      const owner = acl['@graph'].find(a => a['@id'] === '#owner');
+      assert.strictEqual(owner['acl:agent']['@id'], '../profile/card.jsonld#me');
+    });
+
+    it('generatePublicFolderAcl preserves a relative ownerWebId (#430)', () => {
+      const acl = generatePublicFolderAcl('./', './card.jsonld#me');
+      const owner = acl['@graph'].find(a => a['@id'] === '#owner');
+      assert.strictEqual(owner['acl:agent']['@id'], './card.jsonld#me');
+    });
+
+    it('round-trip: relative ownerWebId resolves to .acl base URL on parse (#430)', async () => {
+      // Same ACL document, two hosts — agent should resolve to whichever
+      // host asked, just like accessTo. This is what makes the on-disk
+      // pod portable for the owner half.
+      const generated = generateOwnerAcl('./', './profile/card.jsonld#me', true);
+      const wire = serializeAcl(generated);
+      const auths1 = await parseAcl(wire, 'http://localhost:4444/.acl');
+      const auths2 = await parseAcl(wire, 'http://0.0.0.0:4444/.acl');
+      const owner1 = auths1.find(a => a.id === '#owner');
+      const owner2 = auths2.find(a => a.id === '#owner');
+      assert.ok(owner1.agents.includes('http://localhost:4444/profile/card.jsonld#me'),
+        `Expected localhost agent, got: ${JSON.stringify(owner1.agents)}`);
+      assert.ok(owner2.agents.includes('http://0.0.0.0:4444/profile/card.jsonld#me'),
+        `Expected 0.0.0.0 agent, got: ${JSON.stringify(owner2.agents)}`);
+    });
+
+    // The relativizeOwnerWebId helper drives the Phase 2 callers. Cover
+    // the layouts Copilot asked about so callers don't need to hardcode.
+    describe('relativizeOwnerWebId helper', () => {
+      const podUri = 'http://h/alice/';
+
+      it('emits "./<tail>" from the pod root', () => {
+        assert.strictEqual(
+          relativizeOwnerWebId(`${podUri}profile/card.jsonld#me`, podUri, ''),
+          './profile/card.jsonld#me'
+        );
+      });
+
+      it('emits "../<tail>" from an immediate child folder', () => {
+        assert.strictEqual(
+          relativizeOwnerWebId(`${podUri}profile/card.jsonld#me`, podUri, 'private/'),
+          '../profile/card.jsonld#me'
+        );
+      });
+
+      it('handles legacy /profile/card#me layout', () => {
+        // Pre-#282 pods used extensionless `profile/card`. The helper just
+        // slices the tail, so any layout works.
+        assert.strictEqual(
+          relativizeOwnerWebId(`${podUri}profile/card#me`, podUri, ''),
+          './profile/card#me'
+        );
+        assert.strictEqual(
+          relativizeOwnerWebId(`${podUri}profile/card#me`, podUri, 'private/'),
+          '../profile/card#me'
+        );
+      });
+
+      it('handles a custom (non-profile/) WebID shape', () => {
+        assert.strictEqual(
+          relativizeOwnerWebId(`${podUri}me#me`, podUri, ''),
+          './me#me'
+        );
+        assert.strictEqual(
+          relativizeOwnerWebId(`${podUri}me#me`, podUri, 'public/'),
+          '../me#me'
+        );
+      });
+
+      it('returns the absolute WebID unchanged for foreign owners', () => {
+        const foreign = 'https://other.example/profile/card.jsonld#me';
+        assert.strictEqual(
+          relativizeOwnerWebId(foreign, podUri, ''),
+          foreign
+        );
+        assert.strictEqual(
+          relativizeOwnerWebId(foreign, podUri, 'private/'),
+          foreign
+        );
+      });
+
+      it('round-trips through the parser back to the absolute WebID', async () => {
+        // Helper output is correct iff parsing it under the same pod URI
+        // yields the original absolute WebID. Covers both modern and
+        // legacy layouts, from root and from a child folder.
+        const cases = [
+          { web: `${podUri}profile/card.jsonld#me`, base: '',         acl: `${podUri}.acl` },
+          { web: `${podUri}profile/card.jsonld#me`, base: 'private/', acl: `${podUri}private/.acl` },
+          { web: `${podUri}profile/card#me`,        base: '',         acl: `${podUri}.acl` },
+          { web: `${podUri}profile/card#me`,        base: 'private/', acl: `${podUri}private/.acl` },
+          { web: `${podUri}me#me`,                  base: 'public/',  acl: `${podUri}public/.acl` }
+        ];
+        for (const { web, base, acl } of cases) {
+          const rel = relativizeOwnerWebId(web, podUri, base);
+          const generated = generateOwnerAcl('./', rel, true);
+          const wire = serializeAcl(generated);
+          const auths = await parseAcl(wire, acl);
+          const owner = auths.find(a => a.id === '#owner');
+          assert.ok(
+            owner.agents.includes(web),
+            `Round-trip failed for ${web} from ${base}: relative=${rel}, resolved=${JSON.stringify(owner.agents)}`
+          );
+        }
+      });
+    });
+
+    it('round-trip: relative ownerWebId from a child folder resolves correctly (#430)', async () => {
+      // /pod/private/.acl with agent '../profile/card.jsonld#me'
+      // should resolve to /pod/profile/card.jsonld#me, not into the
+      // pod root or escape it.
+      const generated = generatePrivateAcl('./', '../profile/card.jsonld#me');
+      const wire = serializeAcl(generated);
+      const auths = await parseAcl(wire, 'http://localhost:4444/alice/private/.acl');
+      const owner = auths.find(a => a.id === '#owner');
+      assert.ok(owner.agents.includes('http://localhost:4444/alice/profile/card.jsonld#me'),
+        `Expected resolution to /alice/profile/card.jsonld#me, got: ${JSON.stringify(owner.agents)}`);
+    });
+
+    it('round-trip: relative "./" resolves to the .acl base URL on parse', async () => {
+      const generated = generateOwnerAcl('./', webId, true);
+      const wire = serializeAcl(generated);
+
+      // Parse the same .acl document under two different host URLs and
+      // assert accessTo resolves to whichever host asked. This is what
+      // makes the on-disk pod portable across interfaces.
+      const auths1 = await parseAcl(wire, 'http://localhost:4444/.acl');
+      const auths2 = await parseAcl(wire, 'http://0.0.0.0:4444/.acl');
+
+      const pub1 = auths1.find(a => a.agentClasses.includes('foaf:Agent'));
+      const pub2 = auths2.find(a => a.agentClasses.includes('foaf:Agent'));
+      assert.ok(pub1.accessTo.includes('http://localhost:4444/'),
+        `Expected localhost resolution, got: ${JSON.stringify(pub1.accessTo)}`);
+      assert.ok(pub2.accessTo.includes('http://0.0.0.0:4444/'),
+        `Expected 0.0.0.0 resolution, got: ${JSON.stringify(pub2.accessTo)}`);
+    });
+  });
 });
 
 describe('WAC Checker', () => {
@@ -322,6 +534,27 @@ describe('WAC Integration', () => {
       const modes = publicAuth['acl:mode'].map(m => m['@id']);
       assert.ok(modes.includes('acl:Append'), 'Public should have Append');
       assert.ok(!modes.includes('acl:Read'), 'Public should not have Read');
+    });
+  });
+
+  describe('Cross-host ACL portability (#428)', () => {
+    // The .acl is written with a relative `./` so the public-read rule
+    // matches whichever host the request comes in on. Before #428, the
+    // .acl baked the bind-time host into accessTo and any other host
+    // returned 401. We exercise this by varying the Host: header.
+    it('serves public-read resources regardless of Host header', async () => {
+      // Profile is public-read by default (#427 Phase 1).
+      const baseHost = new URL(getBaseUrl()).host;
+      const profileUrl = `${getBaseUrl()}/wactest/profile/`;
+      const hostsToTry = [baseHost, 'localhost:9999', 'pod.example:443', 'pod.invalid'];
+
+      for (const host of hostsToTry) {
+        const res = await fetch(profileUrl, { headers: { Host: host } });
+        assert.strictEqual(
+          res.status, 200,
+          `Public-read should succeed for Host: ${host} (got ${res.status})`
+        );
+      }
     });
   });
 
