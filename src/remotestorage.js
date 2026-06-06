@@ -33,9 +33,10 @@ export async function remoteStoragePlugin (fastify, options = {}) {
     const wildcard = request.params['*'] || ''
     // Normalize double slashes (RS library appends path to href which ends with /)
     let storagePath = ('/' + wildcard).replace(/\/\/+/g, '/')
-    // Subdomain mode: pod data lives at <root>/<podName>/..., not <root>/
-    if (request.podName) {
-      storagePath = '/' + request.podName + storagePath
+    // Pod prefix: subdomain mode uses request.podName, suffix mode uses :user param
+    const podPrefix = request.podName || request.params.user
+    if (podPrefix) {
+      storagePath = '/' + podPrefix + storagePath
     }
     return storagePath
   }
