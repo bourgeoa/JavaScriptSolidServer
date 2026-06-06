@@ -15,7 +15,7 @@ import {
 } from '../rdf/conneg.js';
 import { emitChange } from '../notifications/events.js';
 import { checkIfMatch, checkIfNoneMatchForGet, checkIfNoneMatchForWrite } from '../utils/conditional.js';
-import { generateDatabrowserHtml, generateModuleDatabrowserHtml, getMashlibDecision, DATA_ISLAND_MAX_BYTES } from '../mashlib/index.js';
+import { generateDatabrowserHtml, generateModuleDatabrowserHtml, getMashlibDecision, shouldServeMashlib, DATA_ISLAND_MAX_BYTES } from '../mashlib/index.js';
 import { turtleToJsonLd } from '../rdf/turtle.js';
 
 /**
