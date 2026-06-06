@@ -70,7 +70,7 @@ export async function remoteStoragePlugin (fastify, options = {}) {
     const storagePath = getStoragePath(request)
 
     // Public folder: readable without auth
-    if (storagePath.startsWith('/public/') && (method === 'GET' || method === 'HEAD')) {
+    if (storagePath.includes('/public/') && (method === 'GET' || method === 'HEAD')) {
       return { authorized: true, webId: null }
     }
 
