@@ -267,7 +267,10 @@ export async function remoteStoragePlugin (fastify, options = {}) {
       return reply.code(ifNoneMatchResult.status).send({ error: ifNoneMatchResult.error })
     }
 
-    const content = Buffer.isBuffer(request.body) ? request.body : Buffer.from(request.body || '')
+    const rawBody = request.body
+    const content = Buffer.isBuffer(rawBody)
+      ? rawBody
+      : Buffer.from(typeof rawBody === 'object' ? JSON.stringify(rawBody) : (rawBody || ''))
     const success = await storage.write(storagePath, content)
     if (!success) {
       return reply.code(500).send({ error: 'Write failed' })
