@@ -32,14 +32,21 @@ export async function remoteStoragePlugin (fastify, options = {}) {
   function getStoragePath (request) {
     const wildcard = request.params['*'] || ''
     // Normalize double slashes (RS library appends path to href which ends with /)
-    return ('/' + wildcard).replace(/\/\/+/g, '/')
+    let storagePath = ('/' + wildcard).replace(/\/\/+/g, '/')
+    // Subdomain mode: pod data lives at <root>/<podName>/..., not <root>/
+    if (request.podName) {
+      storagePath = '/' + request.podName + storagePath
+    }
+    return storagePath
   }
 
   /**
    * Check if the :user param matches the configured username
    */
   function checkUsername (request, reply) {
-    if (request.params.user !== username) {
+    // In multiuser mode (ownerWebId null), accept any user — the subdomain
+    // or path already identifies the pod, and checkAuth handles access control.
+    if (ownerWebId !== null && request.params.user !== username) {
       reply.code(404).send({ error: 'Unknown user' })
       return false
     }
