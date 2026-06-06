@@ -44,7 +44,7 @@ function applyTerminatorSpacing(turtle) {
   const placeholders = [];
   const stash = (m) => {
     placeholders.push(m);
-    return `${placeholders.length - 1}`;
+    return `\x00${placeholders.length - 1}\x00`;
   };
   let s = turtle
     // Triple-quoted strings first (non-greedy, may span newlines).
@@ -60,8 +60,9 @@ function applyTerminatorSpacing(turtle) {
   s = s.replace(/(\S)([;.])\n/g, '$1 $2\n');
   // Final line of the document may end without a trailing newline.
   s = s.replace(/(\S)([;.])$/g, '$1 $2');
-  // Restore.
-  return s.replace(/(\d+)/g, (_, i) => placeholders[Number(i)]);
+  // Restore — NUL-delimited placeholders can't collide with Turtle
+  // content (n3.js never emits NUL bytes).
+  return s.replace(/\x00(\d+)\x00/g, (_, i) => placeholders[Number(i)]);
 }
 
 // Common prefixes for compact output
