@@ -60,6 +60,8 @@ client can connect to JSS ActivityPub pods:
 | `GET /api/v1/statuses/:id` | Status detail |
 | `POST /api/v1/statuses` | Create status |
 | `GET /api/v1/notifications` | Notifications |
+| `GET /api/v1/accounts/:id/followers` | Account followers |
+| `GET /api/v1/accounts/:id/following` | Account following |
 
 These routes bypass auth in the server's WAC hook via `isApPublicPath`
 and `/api/v1/` prefix matching.
