@@ -1374,6 +1374,59 @@ export function createListsHandler () {
 }
 
 /**
+ * GET /api/v1/accounts/:id/followers
+ * Returns accounts following the given user.
+ */
+export function createFollowersHandler () {
+  return async (request, reply) => {
+    const { id } = request.params
+    const username = normalizeAccountIdentifier(id)
+    if (!username) {
+      return reply.code(400).send({ error: 'Invalid account ID' })
+    }
+
+    const protocol = request.headers['x-forwarded-proto'] || request.protocol
+    const host = request.headers['x-forwarded-host'] || request.hostname
+    const baseUrl = `${protocol}://${host}`
+
+    const followers = getFollowers(username)
+    const accounts = followers.map(f => {
+      try {
+        const actor = typeof f.actor === 'string' ? JSON.parse(f.actor) : f.actor
+        return buildAccount(actor.preferredUsername || f.id, baseUrl)
+      } catch { return null }
+    }).filter(Boolean)
+
+    return reply.send(accounts)
+  }
+}
+
+/**
+ * GET /api/v1/accounts/:id/following
+ * Returns accounts the given user follows.
+ */
+export function createFollowingHandler () {
+  return async (request, reply) => {
+    const { id } = request.params
+    const username = normalizeAccountIdentifier(id)
+    if (!username) {
+      return reply.code(400).send({ error: 'Invalid account ID' })
+    }
+
+    const following = getFollowing(username)
+    const accounts = following.map(f => {
+      try {
+        const actor = typeof f.object === 'string' ? JSON.parse(f.object) : f.object
+        const actorId = f.object_id || f.object
+        return buildAccount(actorId, `${request.protocol}://${request.hostname}`)
+      } catch { return null }
+    }).filter(Boolean)
+
+    return reply.send(accounts)
+  }
+}
+
+/**
  * GET /api/v1/accounts/:id/lists
  * Minimal compatibility: account is not in any lists.
  */
@@ -1668,6 +1721,8 @@ export default {
   createListsHandler,
   createAccountListsHandler,
   createRelationshipsHandler,
+  createFollowersHandler,
+  createFollowingHandler,
   createInstanceHandler,
   createSearchHandler,
   createFavouriteStatusHandler,

@@ -12,7 +12,7 @@ import { createInboxHandler } from './routes/inbox.js'
 import { createOutboxHandler, createOutboxPostHandler, createPostObjectHandler } from './routes/outbox.js'
 import { createCollectionsHandler } from './routes/collections.js'
 import { createActorHandler } from './routes/actor.js'
-import { createAppsHandler, createVerifyCredentialsHandler, createUpdateCredentialsHandler, createAccountLookupHandler, createAccountsSearchHandler, createPreferencesHandler, createListsHandler, createAccountListsHandler, createRelationshipsHandler, createInstanceHandler, createInstanceV2Handler, createSearchHandler, createTimelinesHomeHandler, createPostStatusHandler, createGetStatusHandler, createFavouriteStatusHandler, createUpdateStatusHandler, createGetAccountHandler, createGetAccountStatusesHandler, createFollowAccountHandler, createGetNotificationsHandler, getProfileMediaBuffer } from './routes/mastodon.js'
+import { createAppsHandler, createVerifyCredentialsHandler, createUpdateCredentialsHandler, createAccountLookupHandler, createAccountsSearchHandler, createPreferencesHandler, createListsHandler, createAccountListsHandler, createRelationshipsHandler, createFollowersHandler, createFollowingHandler, createInstanceHandler, createInstanceV2Handler, createSearchHandler, createTimelinesHomeHandler, createPostStatusHandler, createGetStatusHandler, createFavouriteStatusHandler, createUpdateStatusHandler, createGetAccountHandler, createGetAccountStatusesHandler, createFollowAccountHandler, createGetNotificationsHandler, getProfileMediaBuffer } from './routes/mastodon.js'
 import { createAuthorizeHandler, createAuthorizePostHandler, createTokenHandler } from './routes/oauth.js'
 
 // Shared state for actor handler (accessed by server.js)
@@ -423,6 +423,8 @@ export async function activityPubPlugin(fastify, options = {}) {
   fastify.put('/api/v1/statuses/:id', createUpdateStatusHandler())
   fastify.put('/api/v1/statuses/*', createUpdateStatusHandler())
   fastify.get('/api/v1/accounts/:id', createGetAccountHandler())
+  fastify.get('/api/v1/accounts/:id/followers', createFollowersHandler())
+  fastify.get('/api/v1/accounts/:id/following', createFollowingHandler())
   fastify.get('/api/v1/accounts/:id/lists', createAccountListsHandler())
   fastify.get('/api/v1/accounts/:id/statuses', createGetAccountStatusesHandler())
   fastify.post('/api/v1/accounts/:id/follow', createFollowAccountHandler(getUserConfig))
