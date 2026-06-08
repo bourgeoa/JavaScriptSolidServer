@@ -32,14 +32,22 @@ export async function remoteStoragePlugin (fastify, options = {}) {
   function getStoragePath (request) {
     const wildcard = request.params['*'] || ''
     // Normalize double slashes (RS library appends path to href which ends with /)
-    return ('/' + wildcard).replace(/\/\/+/g, '/')
+    let storagePath = ('/' + wildcard).replace(/\/\/+/g, '/')
+    // Pod prefix: subdomain mode uses request.podName, suffix mode uses :user param
+    const podPrefix = request.podName || request.params.user
+    if (podPrefix) {
+      storagePath = '/' + podPrefix + storagePath
+    }
+    return storagePath
   }
 
   /**
    * Check if the :user param matches the configured username
    */
   function checkUsername (request, reply) {
-    if (request.params.user !== username) {
+    // In multiuser mode (ownerWebId null), accept any user — the subdomain
+    // or path already identifies the pod, and checkAuth handles access control.
+    if (ownerWebId !== null && request.params.user !== username) {
       reply.code(404).send({ error: 'Unknown user' })
       return false
     }
@@ -62,7 +70,7 @@ export async function remoteStoragePlugin (fastify, options = {}) {
     const storagePath = getStoragePath(request)
 
     // Public folder: readable without auth
-    if (storagePath.startsWith('/public/') && (method === 'GET' || method === 'HEAD')) {
+    if (storagePath.includes('/public/') && (method === 'GET' || method === 'HEAD')) {
       return { authorized: true, webId: null }
     }
 
@@ -260,7 +268,10 @@ export async function remoteStoragePlugin (fastify, options = {}) {
       return reply.code(ifNoneMatchResult.status).send({ error: ifNoneMatchResult.error })
     }
 
-    const content = Buffer.isBuffer(request.body) ? request.body : Buffer.from(request.body || '')
+    const rawBody = request.body
+    const content = Buffer.isBuffer(rawBody)
+      ? rawBody
+      : Buffer.from(typeof rawBody === 'object' ? JSON.stringify(rawBody) : (rawBody || ''))
     const success = await storage.write(storagePath, content)
     if (!success) {
       return reply.code(500).send({ error: 'Write failed' })

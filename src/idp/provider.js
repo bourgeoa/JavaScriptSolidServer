@@ -216,6 +216,7 @@ export async function createProvider(issuer) {
           `;
         },
       },
+
     },
 
     // Token format - JWT for Solid-OIDC
