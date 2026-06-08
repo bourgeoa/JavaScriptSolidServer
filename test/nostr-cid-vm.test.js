@@ -74,14 +74,14 @@ function nostrPubkeyToFformMultikey(pubHex, parity = '02') {
 // --- profile fixtures ------------------------------------------------
 
 const POD_HOST = 'alice.example.com';
-const WEBID = `https://${POD_HOST}/profile/card.jsonld#me`;
-const DOC_URL = `https://${POD_HOST}/profile/card.jsonld`;
+const WEBID = `https://${POD_HOST}/profile/card#me`;
+const DOC_URL = `https://${POD_HOST}/profile/card`;
 
 // Path-mode equivalents (JSS's default deployment shape).
 const PATH_HOST = 'example.com';
 const PATH_PODNAME = 'alice';
-const PATH_WEBID = `https://${PATH_HOST}/${PATH_PODNAME}/profile/card.jsonld#me`;
-const PATH_DOC_URL = `https://${PATH_HOST}/${PATH_PODNAME}/profile/card.jsonld`;
+const PATH_WEBID = `https://${PATH_HOST}/${PATH_PODNAME}/profile/card#me`;
+const PATH_DOC_URL = `https://${PATH_HOST}/${PATH_PODNAME}/profile/card`;
 
 function buildProfile({ pubkey, vmId = `${DOC_URL}#nostr-key-1`, withAuth = true, jwk = null, webId = WEBID } = {}) {
   const vm = jwk
@@ -190,7 +190,7 @@ describe('NIP-98 + CID verificationMethod lookup (#399)', () => {
   it("rejects when CID document's subject differs from computed owner WebID", async () => {
     // Profile sits at the expected docUrl but declares a DIFFERENT
     // @id. Without the subject check, this would let an attacker
-    // host a card.jsonld whose @id is "...#bob" + a Nostr VM under
+    // host a card whose @id is "...#bob" + a Nostr VM under
     // bob's name, and trick us into authenticating as bob when the
     // request URL says alice.
     nextProfile = {
@@ -269,9 +269,9 @@ describe('NIP-98 + CID verificationMethod lookup (#399)', () => {
   });
 
   it('upgrades did:nostr → WebID in single-user mode', async () => {
-    // Single-user: one pod at the host root, WebID at /profile/card.jsonld#me.
+    // Single-user: one pod at the host root, WebID at /profile/card#me.
     const SINGLE_HOST = 'pod.example.com';
-    const SINGLE_DOC = `https://${SINGLE_HOST}/profile/card.jsonld`;
+    const SINGLE_DOC = `https://${SINGLE_HOST}/profile/card`;
     const SINGLE_WEBID = `${SINGLE_DOC}#me`;
     urlResponses.set(SINGLE_DOC, {
       status: 200,
@@ -296,9 +296,9 @@ describe('NIP-98 + CID verificationMethod lookup (#399)', () => {
 
   it('upgrades did:nostr → WebID in single-user mode with a named pod', async () => {
     // singleUser=true + singleUserName='alice' mounts the pod at
-    // /alice/, with WebID at /alice/profile/card.jsonld#me.
+    // /alice/, with WebID at /alice/profile/card#me.
     const NAMED_HOST = 'pod.example.com';
-    const NAMED_DOC = `https://${NAMED_HOST}/alice/profile/card.jsonld`;
+    const NAMED_DOC = `https://${NAMED_HOST}/alice/profile/card`;
     const NAMED_WEBID = `${NAMED_DOC}#me`;
     urlResponses.set(NAMED_DOC, {
       status: 200,
@@ -351,7 +351,7 @@ describe('NIP-98 + CID verificationMethod lookup (#399)', () => {
     // baseDomain and the path-mode-on-base branch never matches.
     const PORT_HOST = 'example.com:8080';
     const SUB_HOST = 'alice.example.com';
-    const SUB_DOC = `https://${SUB_HOST}/profile/card.jsonld`;
+    const SUB_DOC = `https://${SUB_HOST}/profile/card`;
     const SUB_WEBID = `${SUB_DOC}#me`;
     urlResponses.set(SUB_DOC, {
       status: 200,
@@ -424,7 +424,7 @@ describe('NIP-98 + CID verificationMethod lookup (#399)', () => {
     // lookup gets nothing and we fall through to did:nostr.
     urlResponses.set(DOC_URL, {
       status: 302,
-      headers: { location: 'https://attacker.example/profile/card.jsonld' },
+      headers: { location: 'https://attacker.example/profile/card' },
     });
     const url = `https://${POD_HOST}/private/data.ttl`;
     const { authHeader } = nip98Authorization({ method: 'GET', url, secretKey: sk });
@@ -541,7 +541,7 @@ describe('NIP-98 + CID verificationMethod lookup (#399)', () => {
       // This is the "key bound by an unrelated controller" attack the
       // controller-consistency check defends against.
       const profile = buildProfile({ pubkey: pk });
-      profile.verificationMethod[0].controller = 'https://attacker.example/profile/card.jsonld#me';
+      profile.verificationMethod[0].controller = 'https://attacker.example/profile/card#me';
       nextProfile = profile;
       const ok = await verifyNostrPubkeyAgainstWebId(WEBID, pk);
       assert.strictEqual(ok, false);

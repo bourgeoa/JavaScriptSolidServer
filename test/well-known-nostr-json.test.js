@@ -88,7 +88,7 @@ describe('NIP-05 MVP — single-user with provisioned key', () => {
       await fs.readFile(`${DATA_DIR}/.well-known/nostr.json`, 'utf8')
     );
     const profile = JSON.parse(
-      await fs.readFile(`${DATA_DIR}/profile/card.jsonld`, 'utf8')
+      await fs.readFile(`${DATA_DIR}/profile/card`, 'utf8')
     );
     const vm = profile.verificationMethod[0];
     assert.ok(vm.publicKeyMultibase.includes(onDisk.names._),

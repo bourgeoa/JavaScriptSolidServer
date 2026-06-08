@@ -82,7 +82,7 @@ export const defaults = {
   // Single-user mode (personal pod server)
   singleUser: false,
   // null = root pod (mounted at server origin, WebID at
-  // /profile/card.jsonld#me). A string mounts the pod at /<name>/ —
+  // /profile/card#me). A string mounts the pod at /<name>/ —
   // useful when more than one Solid identity coexists on the same
   // origin, or when the operator wants the pre-#348 /me/ shape.
   singleUserName: null,

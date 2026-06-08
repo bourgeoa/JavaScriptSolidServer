@@ -17,6 +17,7 @@ import { emitChange } from '../notifications/events.js';
 import { checkIfMatch, checkIfNoneMatchForGet, checkIfNoneMatchForWrite } from '../utils/conditional.js';
 import { generateDatabrowserHtml, generateModuleDatabrowserHtml, getMashlibDecision, shouldServeMashlib, DATA_ISLAND_MAX_BYTES } from '../mashlib/index.js';
 import { turtleToJsonLd } from '../rdf/turtle.js';
+import { urlToStoragePath, resolveDollarPath } from '../utils/dollar-escape.js';
 
 /**
  * Live reload script - injected into HTML when --live-reload is enabled
@@ -140,8 +141,17 @@ function getMashlibEtag(request, stats, storagePath) {
  * Handle GET request
  */
 export async function handleGet(request, reply) {
-  const { urlPath, storagePath, resourceUrl } = getRequestPaths(request);
-  const stats = await storage.stat(storagePath);
+  let { urlPath, storagePath, resourceUrl } = getRequestPaths(request);
+  let stats = await storage.stat(storagePath);
+
+  if (!stats) {
+    // Extensionless RDF fallback: try $ escaping (e.g. /profile/card → card$.jsonld)
+    const resolved = await resolveDollarPath(storagePath, (p) => storage.stat(p));
+    if (resolved !== storagePath) {
+      storagePath = resolved;
+      stats = await storage.stat(resolved);
+    }
+  }
 
   if (!stats) {
     const origin = request.headers.origin;
@@ -628,8 +638,16 @@ export async function handleGet(request, reply) {
  * Handle HEAD request
  */
 export async function handleHead(request, reply) {
-  const { storagePath, resourceUrl } = getRequestPaths(request);
-  const stats = await storage.stat(storagePath);
+  let { storagePath, resourceUrl } = getRequestPaths(request);
+  let stats = await storage.stat(storagePath);
+
+  if (!stats) {
+    const resolved = await resolveDollarPath(storagePath, (p) => storage.stat(p));
+    if (resolved !== storagePath) {
+      storagePath = resolved;
+      stats = await storage.stat(resolved);
+    }
+  }
 
   if (!stats) {
     const origin = request.headers.origin;
@@ -732,7 +750,9 @@ export async function handlePut(request, reply) {
     return reply.code(405).send({ error: 'Method Not Allowed', message: 'Server is in read-only mode' });
   }
 
-  const { urlPath, storagePath, resourceUrl } = getRequestPaths(request);
+  const { urlPath, storagePath: rawStoragePath, resourceUrl } = getRequestPaths(request);
+  // $ escape: extensionless URLs with RDF Content-Type → card$.jsonld on disk
+  const storagePath = urlToStoragePath(rawStoragePath, request.headers['content-type'] || '');
   const connegEnabled = request.connegEnabled || false;
 
   // Handle container creation via PUT
@@ -908,10 +928,17 @@ export async function handleDelete(request, reply) {
     return reply.code(405).send({ error: 'Method Not Allowed', message: 'Server is in read-only mode' });
   }
 
-  const { storagePath, resourceUrl } = getRequestPaths(request);
+  let { storagePath, resourceUrl } = getRequestPaths(request);
+  let stats = await storage.stat(storagePath);
 
-  // Check if resource exists and get current ETag
-  const stats = await storage.stat(storagePath);
+  if (!stats) {
+    const resolved = await resolveDollarPath(storagePath, (p) => storage.stat(p));
+    if (resolved !== storagePath) {
+      storagePath = resolved;
+      stats = await storage.stat(resolved);
+    }
+  }
+
   if (!stats) {
     const origin = request.headers.origin;
     const connegEnabled = request.connegEnabled || false;
@@ -985,7 +1012,7 @@ export async function handlePatch(request, reply) {
     return reply.code(405).send({ error: 'Method Not Allowed', message: 'Server is in read-only mode' });
   }
 
-  const { urlPath, storagePath, resourceUrl } = getRequestPaths(request);
+  let { urlPath, storagePath, resourceUrl } = getRequestPaths(request);
 
   // Don't allow PATCH to containers
   if (isContainer(urlPath)) {
@@ -1005,7 +1032,16 @@ export async function handlePatch(request, reply) {
   }
 
   // Check if resource exists - PATCH can create resources in Solid
-  const stats = await storage.stat(storagePath);
+  let stats = await storage.stat(storagePath);
+
+  if (!stats) {
+    const resolved = await resolveDollarPath(storagePath, (p) => storage.stat(p));
+    if (resolved !== storagePath) {
+      storagePath = resolved;
+      stats = await storage.stat(resolved);
+    }
+  }
+
   const resourceExists = !!stats;
 
   // Check If-Match header (for safe updates) - only if resource exists

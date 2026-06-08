@@ -227,7 +227,7 @@ describe('DID:nostr Resolution', () => {
 
     it('checkCidVmBacklink: handles relative @id when docUrl is supplied', async () => {
       const { _checkCidVmBacklinkForTests } = await import('../src/auth/did-nostr.js');
-      const docUrl = 'http://example.test/profile/card.jsonld';
+      const docUrl = 'http://example.test/profile/card';
       // Relative subject AND absolute VM IDs (a common mixed shape).
       // Without the docUrl fallback, base would be empty and the
       // authentication-membership check would silently fail.

@@ -231,7 +231,7 @@ describe('createPodStructure — provisionKeys option (direct call)', () => {
 
   it('returns ownerKey when provisionKeys is true', async () => {
     const podUri = 'http://127.0.0.1:0/direct1/';
-    const webId = `${podUri}profile/card.jsonld#me`;
+    const webId = `${podUri}profile/card#me`;
     const result = await createPodStructure(
       'direct1', webId, podUri, podUri.replace(/\/$/, '/'), 0,
       { provisionKeys: true }
@@ -250,7 +250,7 @@ describe('createPodStructure — provisionKeys option (direct call)', () => {
     assert.strictEqual(result.ownerKey.vm.controller, webId);
     assert.strictEqual(
       result.ownerKey.vm['@id'],
-      `${podUri}profile/card.jsonld#owner-key`
+      `${podUri}profile/card#owner-key`
     );
     assert.strictEqual(
       result.ownerKey.didNostr,
@@ -260,7 +260,7 @@ describe('createPodStructure — provisionKeys option (direct call)', () => {
 
   it('returns no ownerKey when the option is omitted', async () => {
     const podUri = 'http://127.0.0.1:0/direct2/';
-    const webId = `${podUri}profile/card.jsonld#me`;
+    const webId = `${podUri}profile/card#me`;
     const result = await createPodStructure(
       'direct2', webId, podUri, podUri.replace(/\/$/, '/'), 0
     );
@@ -272,7 +272,7 @@ describe('createPodStructure — provisionKeys option (direct call)', () => {
     // misconfigured caller passing 'true' / 1 / etc. through the
     // direct API doesn't silently provision a plaintext secret.
     const podUri = 'http://127.0.0.1:0/direct3/';
-    const webId = `${podUri}profile/card.jsonld#me`;
+    const webId = `${podUri}profile/card#me`;
     const result = await createPodStructure(
       'direct3', webId, podUri, podUri.replace(/\/$/, '/'), 0,
       { provisionKeys: 'true' }   // intentionally string, not boolean

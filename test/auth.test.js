@@ -169,7 +169,7 @@ describe('Authentication', () => {
           {
             '@id': '#owner',
             '@type': 'acl:Authorization',
-            'acl:agent': { '@id': `${baseUrl}/appendpatch1/profile/card.jsonld#me` },
+            'acl:agent': { '@id': `${baseUrl}/appendpatch1/profile/card#me` },
             'acl:accessTo': { '@id': `${baseUrl}/appendpatch1/public/` },
             'acl:default': { '@id': `${baseUrl}/appendpatch1/public/` },
             'acl:mode': [
@@ -239,7 +239,7 @@ describe('Authentication', () => {
           {
             '@id': '#owner',
             '@type': 'acl:Authorization',
-            'acl:agent': { '@id': `${baseUrl}/appendpatch2/profile/card.jsonld#me` },
+            'acl:agent': { '@id': `${baseUrl}/appendpatch2/profile/card#me` },
             'acl:accessTo': { '@id': `${baseUrl}/appendpatch2/public/` },
             'acl:default': { '@id': `${baseUrl}/appendpatch2/public/` },
             'acl:mode': [
@@ -317,7 +317,7 @@ describe('Authentication', () => {
           {
             '@id': '#owner',
             '@type': 'acl:Authorization',
-            'acl:agent': { '@id': `${baseUrl}/authuser1/profile/card.jsonld#me` },
+            'acl:agent': { '@id': `${baseUrl}/authuser1/profile/card#me` },
             'acl:accessTo': { '@id': `${baseUrl}/authuser1/authenticated-only/` },
             'acl:default': { '@id': `${baseUrl}/authuser1/authenticated-only/` },
             'acl:mode': [
@@ -368,7 +368,7 @@ describe('Authentication', () => {
           {
             '@id': '#owner-no-control',
             '@type': 'acl:Authorization',
-            'acl:agent': { '@id': `${baseUrl}/aclowner1/profile/card.jsonld#me` },
+            'acl:agent': { '@id': `${baseUrl}/aclowner1/profile/card#me` },
             'acl:accessTo': { '@id': `${baseUrl}/aclowner1/public/` },
             'acl:default': { '@id': `${baseUrl}/aclowner1/public/` },
             'acl:mode': [
@@ -394,7 +394,7 @@ describe('Authentication', () => {
           {
             '@id': '#owner-updated',
             '@type': 'acl:Authorization',
-            'acl:agent': { '@id': `${baseUrl}/aclowner1/profile/card.jsonld#me` },
+            'acl:agent': { '@id': `${baseUrl}/aclowner1/profile/card#me` },
             'acl:accessTo': { '@id': `${baseUrl}/aclowner1/public/` },
             'acl:default': { '@id': `${baseUrl}/aclowner1/public/` },
             'acl:mode': [
@@ -436,7 +436,7 @@ describe('Authentication', () => {
           {
             '@id': '#owner',
             '@type': 'acl:Authorization',
-            'acl:agent': { '@id': `${baseUrl}/aclowner2/profile/card.jsonld#me` },
+            'acl:agent': { '@id': `${baseUrl}/aclowner2/profile/card#me` },
             'acl:accessTo': { '@id': `${baseUrl}/aclowner2/public/` },
             'acl:default': { '@id': `${baseUrl}/aclowner2/public/` },
             'acl:mode': [

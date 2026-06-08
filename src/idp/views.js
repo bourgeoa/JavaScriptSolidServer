@@ -972,7 +972,7 @@ export function registerPage(uid = null, error = null, success = null, inviteOnl
       } else {
         pod = (cfg.baseUri || (location.protocol + '//' + location.host)) + '/' + u + '/';
       }
-      webid = pod + 'profile/card.jsonld#me';
+      webid = pod + 'profile/card#me';
       webEl.textContent = webid;
       webEl.className = '';
       storEl.textContent = pod;

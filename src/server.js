@@ -438,12 +438,12 @@ export function createServer(options = {}) {
     // Note: OPTIONS requests are handled by handleOptions to include Accept-* headers
   });
 
-  // ActivityPub actor endpoint - dedicated route for /profile/card.jsonld with AP Accept header
+  // ActivityPub actor endpoint - dedicated route for /profile/card with AP Accept header
   // Registered before wildcard routes to take priority
   if (activitypubEnabled) {
     fastify.route({
       method: 'GET',
-      url: '/profile/card.jsonld',
+      url: '/profile/card',
       handler: async (request, reply) => {
         const accept = request.headers.accept || '';
         const wantsAP = accept.includes('activity+json') ||
@@ -642,7 +642,7 @@ export function createServer(options = {}) {
   fastify.addHook('preHandler', async (request, reply) => {
     // Skip auth for pod creation, OPTIONS, IdP routes, mashlib, well-known, notifications, nostr, git, and AP
     const mashlibPaths = ['/mashlib.min.js', '/mash.css', '/841.mashlib.min.js'];
-    const apPaths = ['/inbox', '/posts/', '/profile/avatar.png', '/profile/header.png', '/profile/card.jsonld/inbox', '/profile/card.jsonld/outbox', '/profile/card.jsonld/followers', '/profile/card.jsonld/following',
+    const apPaths = ['/inbox', '/posts/', '/profile/avatar.png', '/profile/header.png', '/profile/card/inbox', '/profile/card/outbox', '/profile/card/followers', '/profile/card/following',
       '/api/v1/apps', '/api/v1/instance', '/api/v1/accounts/verify_credentials',
       '/api/v1/timelines/', '/api/v1/statuses', '/api/v1/accounts/', '/api/v1/notifications',
       '/oauth/authorize', '/oauth/token'];
@@ -654,7 +654,7 @@ export function createServer(options = {}) {
     // Check if request wants ActivityPub content for profile
     const accept = request.headers.accept || '';
     const wantsAP = accept.includes('activity+json') || accept.includes('ld+json; profile="https://www.w3.org/ns/activitystreams"');
-    const isProfileAP = activitypubEnabled && wantsAP && (request.url === '/profile/card.jsonld' || request.url.startsWith('/profile/card.jsonld?'));
+    const isProfileAP = activitypubEnabled && wantsAP && (request.url === '/profile/card' || request.url.startsWith('/profile/card?'));
     if (request.url === '/.pods' ||
         request.url === '/.notifications' ||
         request.method === 'OPTIONS' ||
@@ -899,17 +899,17 @@ export function createServer(options = {}) {
       const podUri = isRootPod ? `${baseUrl}/` : `${baseUrl}/${singleUserName}/`;
       const displayName = isRootPod ? 'me' : singleUserName;
 
-      // Check if pod already exists. Accept either the new `card.jsonld`
+      // Check if pod already exists. Accept either the new `card`
       // or legacy extensionless `card` layout so we don't re-seed a pod
       // that was created by an older JSS version. Compute the effective
       // WebID against whichever profile file actually resolves — a
       // legacy pod must keep its `/profile/card#me` WebID, otherwise the
       // seeded IDP account would point at a non-existent document.
-      const hasJsonLd = await storage.exists(`${podPath}profile/card.jsonld`);
+      const hasJsonLd = await storage.exists(`${podPath}profile/card`);
       const hasLegacy = !hasJsonLd && await storage.exists(`${podPath}profile/card`);
-      const profileFile = hasJsonLd ? 'profile/card.jsonld'
+      const profileFile = hasJsonLd ? 'profile/card'
                           : hasLegacy ? 'profile/card'
-                          : 'profile/card.jsonld'; // fresh pod default
+                          : 'profile/card'; // fresh pod default
       const webId = `${podUri}${profileFile}#me`;
       const profileExists = hasJsonLd || hasLegacy;
 
@@ -1153,7 +1153,7 @@ export function createServer(options = {}) {
     // the server happened to bind on first start. The owner WebID is
     // derived from the absolute `webId` and each .acl's location by
     // `relativizeOwnerWebId`, so any current or future profile layout
-    // (modern `profile/card.jsonld#me`, legacy `profile/card#me`, etc.)
+    // (modern `profile/card#me`, legacy `profile/card#me`, etc.)
     // produces the correct relative IRI without hardcoding.
     const owner = aclBase => relativizeOwnerWebId(webId, podUri, aclBase);
 
@@ -1219,7 +1219,7 @@ export function createServer(options = {}) {
     // verificationMethod when --provision-keys is on). Written last —
     // see ordering rationale above.
     const profile = generateProfile({ webId, name: displayName, podUri, issuer, ownerVm: ownerKey?.vm });
-    await storage.write('/profile/card.jsonld', serialize(profile));
+    await storage.write('/profile/card', serialize(profile));
 
     // Note: Quota not initialized for root-level pods (no user directory).
     // Spread `ownerKey` only when set so the field is genuinely absent

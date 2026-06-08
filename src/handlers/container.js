@@ -223,7 +223,7 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
   // The owner WebID is also written relatively (#430), derived from the
   // absolute `webId` and the .acl's location within the pod by
   // `relativizeOwnerWebId`. This works for any profile layout (modern
-  // `profile/card.jsonld#me`, legacy `profile/card#me`, custom shapes) and
+  // `profile/card.jsonld#me`, legacy `profile/card.jsonld#me`, custom shapes) and
   // falls back to the absolute WebID for foreign owners. Together this
   // keeps the on-disk pod portable across hostnames.
   const owner = aclBase => relativizeOwnerWebId(webId, podUri, aclBase);
@@ -289,7 +289,7 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
     }
   }
 
-  // Generate and write WebID profile at /profile/card.jsonld. When an
+  // Generate and write WebID profile at /profile/card. When an
   // owner key was provisioned, its VM lands in the profile so the
   // existing LWS-CID verifier (src/auth/lws-cid.js) can authenticate
   // JWTs signed with the matching secret. Profile is intentionally
@@ -311,7 +311,7 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
  *
  * Creates the following structure:
  *   /{name}/
- *   /{name}/profile/card.jsonld          - WebID profile
+ *   /{name}/profile/card          - WebID profile
  *   /{name}/inbox/                       - Notifications
  *   /{name}/public/                      - Public files
  *   /{name}/private/                     - Private files

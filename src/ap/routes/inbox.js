@@ -156,7 +156,7 @@ export function createInboxHandler(config, keypair) {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
     const host = request.headers['x-forwarded-host'] || request.hostname
     const baseUrl = `${protocol}://${host}`
-    const profileUrl = `${baseUrl}/profile/card.jsonld`
+    const profileUrl = `${baseUrl}/profile/card`
     const actorId = `${profileUrl}#me`
 
     request.log.info(`Received ${activity.type} from ${activity.actor}`)

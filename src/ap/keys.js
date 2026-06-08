@@ -59,8 +59,8 @@ export function loadOrCreateKeypair(path) {
 
 /**
  * Get key ID for HTTP Signatures
- * @param {string} actorId - Actor URL (e.g., https://example.com/profile/card.jsonld#me)
- * @returns {string} Key ID (e.g., https://example.com/profile/card.jsonld#main-key)
+ * @param {string} actorId - Actor URL (e.g., https://example.com/profile/card#me)
+ * @returns {string} Key ID (e.g., https://example.com/profile/card#main-key)
  */
 export function getKeyId(actorId) {
   // Strip fragment and add #main-key

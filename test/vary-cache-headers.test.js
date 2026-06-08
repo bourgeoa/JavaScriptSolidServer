@@ -24,7 +24,7 @@ describe('Vary / Cache-Control consistency (#315)', () => {
     await startTestServer({ conneg: true, mashlibCdn: true });
     await createTestPod('varytest');
     // Create a JSON-LD resource to exercise all variants.
-    await request('/varytest/public/card.jsonld', {
+    await request('/varytest/public/card', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/ld+json' },
       body: JSON.stringify({
@@ -46,7 +46,7 @@ describe('Vary / Cache-Control consistency (#315)', () => {
     ];
     const varyValues = [];
     for (const accept of accepts) {
-      const res = await request('/varytest/public/card.jsonld', { headers: { Accept: accept } });
+      const res = await request('/varytest/public/card', { headers: { Accept: accept } });
       varyValues.push({ accept, vary: res.headers.get('vary') });
     }
     // All three variants must carry the same Vary — inconsistent Vary is
@@ -62,7 +62,7 @@ describe('Vary / Cache-Control consistency (#315)', () => {
   });
 
   it('mashlib HTML wrapper uses Cache-Control: no-store', async () => {
-    const res = await request('/varytest/public/card.jsonld', {
+    const res = await request('/varytest/public/card', {
       headers: { Accept: 'text/html,*/*;q=0.8' }
     });
     assert.match(res.headers.get('content-type') || '', /text\/html/);
@@ -75,7 +75,7 @@ describe('Vary / Cache-Control consistency (#315)', () => {
     // leakage and force freshness) fails the test.
     const expected = 'private, no-cache, must-revalidate';
     for (const accept of ['text/turtle', 'application/ld+json']) {
-      const res = await request('/varytest/public/card.jsonld', { headers: { Accept: accept } });
+      const res = await request('/varytest/public/card', { headers: { Accept: accept } });
       assert.strictEqual(res.headers.get('cache-control'), expected,
         `Cache-Control mismatch on Accept: ${accept}`);
       // ETag is preserved so revalidation is cheap (304).
@@ -84,10 +84,10 @@ describe('Vary / Cache-Control consistency (#315)', () => {
   });
 
   it('mashlib HTML ETag differs from raw RDF ETag (#456)', async () => {
-    const htmlRes = await request('/varytest/public/card.jsonld', {
+    const htmlRes = await request('/varytest/public/card', {
       headers: { Accept: 'text/html,*/*;q=0.8' }
     });
-    const jsonRes = await request('/varytest/public/card.jsonld', {
+    const jsonRes = await request('/varytest/public/card', {
       headers: { Accept: 'application/ld+json' }
     });
     const htmlEtag = htmlRes.headers.get('etag');
@@ -103,12 +103,12 @@ describe('Vary / Cache-Control consistency (#315)', () => {
   });
 
   it('If-None-Match with HTML ETag does not 304 the JSON-LD variant (#456)', async () => {
-    const htmlRes = await request('/varytest/public/card.jsonld', {
+    const htmlRes = await request('/varytest/public/card', {
       headers: { Accept: 'text/html,*/*;q=0.8' }
     });
     const htmlEtag = htmlRes.headers.get('etag');
     // Use the HTML ETag to request JSON-LD — should NOT get 304
-    const jsonRes = await request('/varytest/public/card.jsonld', {
+    const jsonRes = await request('/varytest/public/card', {
       headers: { Accept: 'application/ld+json', 'If-None-Match': htmlEtag }
     });
     assert.strictEqual(jsonRes.status, 200,
@@ -116,12 +116,12 @@ describe('Vary / Cache-Control consistency (#315)', () => {
   });
 
   it('If-None-Match with JSON-LD ETag does not 304 the HTML variant (#456)', async () => {
-    const jsonRes = await request('/varytest/public/card.jsonld', {
+    const jsonRes = await request('/varytest/public/card', {
       headers: { Accept: 'application/ld+json' }
     });
     const jsonEtag = jsonRes.headers.get('etag');
     // Use the JSON-LD ETag to request HTML — should NOT get 304
-    const htmlRes = await request('/varytest/public/card.jsonld', {
+    const htmlRes = await request('/varytest/public/card', {
       headers: { Accept: 'text/html,*/*;q=0.8', 'If-None-Match': jsonEtag }
     });
     assert.strictEqual(htmlRes.status, 200,
@@ -130,10 +130,10 @@ describe('Vary / Cache-Control consistency (#315)', () => {
 
   it('HEAD returns same ETag as GET for each variant (#456)', async () => {
     for (const accept of ['text/html,*/*;q=0.8', 'application/ld+json']) {
-      const getRes = await request('/varytest/public/card.jsonld', {
+      const getRes = await request('/varytest/public/card', {
         headers: { Accept: accept }
       });
-      const headRes = await request('/varytest/public/card.jsonld', {
+      const headRes = await request('/varytest/public/card', {
         method: 'HEAD',
         headers: { Accept: accept }
       });

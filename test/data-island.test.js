@@ -35,11 +35,11 @@ import {
 describe('mashlib data island — emission (unit, #7)', () => {
   it('emits <script type="application/ld+json" id="dataisland" data-uri="..."> when payload supplied', () => {
     const html = generateDatabrowserHtml(
-      'https://test.solid.social/profile/card.jsonld',
+      'https://test.solid.social/profile/card',
       '2.0.0',
       { embedJsonLd: '{"@id":"#me","foaf:name":"Alice"}' }
     );
-    assert.match(html, /<script type="application\/ld\+json" id="dataisland" data-uri="https:\/\/test\.solid\.social\/profile\/card\.jsonld">/);
+    assert.match(html, /<script type="application\/ld\+json" id="dataisland" data-uri="https:\/\/test\.solid\.social\/profile\/card">/);
     assert.match(html, /"@id":"#me"/);
     assert.match(html, /<\/script>/);
   });
@@ -133,10 +133,10 @@ describe('mashlib data island — emission (unit, #7)', () => {
   it('the module-mode wrapper also emits the data island', () => {
     const html = generateModuleDatabrowserHtml(
       'https://example.test/mashlib.js',
-      'https://test.solid.social/profile/card.jsonld',
+      'https://test.solid.social/profile/card',
       { embedJsonLd: '{"@id":"#me"}' }
     );
-    assert.match(html, /<script type="application\/ld\+json" id="dataisland" data-uri="https:\/\/test\.solid\.social\/profile\/card\.jsonld">/);
+    assert.match(html, /<script type="application\/ld\+json" id="dataisland" data-uri="https:\/\/test\.solid\.social\/profile\/card">/);
     assert.match(html, /"@id":"#me"/);
   });
 

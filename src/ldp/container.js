@@ -2,6 +2,8 @@
  * Generate container representation as JSON-LD
  */
 
+import { fileNameToUrlName } from '../utils/dollar-escape.js';
+
 const LDP = 'http://www.w3.org/ns/ldp#';
 
 // Dotfiles allowed to appear in ldp:contains. Anything else starting with '.'
@@ -43,7 +45,8 @@ export function generateContainerJsonLd(containerUrl, entries) {
   const baseUrl = containerUrl.endsWith('/') ? containerUrl : containerUrl + '/';
 
   const contains = entries.filter(entry => !isHiddenEntry(entry.name)).map(entry => {
-    const childUrl = baseUrl + entry.name + (entry.isDirectory ? '/' : '');
+    const urlName = fileNameToUrlName(entry.name);
+    const childUrl = baseUrl + urlName + (entry.isDirectory ? '/' : '');
     const item = {
       '@id': childUrl,
       '@type': entry.isDirectory ? [`${LDP}Container`, `${LDP}BasicContainer`, `${LDP}Resource`] : [`${LDP}Resource`]

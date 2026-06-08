@@ -577,7 +577,7 @@ describe('Identity Provider - Root pod type index ACLs', () => {
 
 // #348: --single-user with no name flag now defaults to a root pod
 // (was '/me/' historically). The server-side seed must land the
-// profile at /profile/card.jsonld, not /me/profile/card.jsonld.
+// profile at /profile/card, not /me/profile/card.
 describe('Single-user default — root pod (#348)', () => {
   let server;
   let baseUrl;
@@ -611,23 +611,23 @@ describe('Single-user default — root pod (#348)', () => {
     await fs.remove(DEFAULT_DATA_DIR);
   });
 
-  it('seeds the profile at /profile/card.jsonld (not /me/profile/...)', async () => {
-    const root = await fetch(`${baseUrl}/profile/card.jsonld`);
+  it('seeds the profile at /profile/card (not /me/profile/...)', async () => {
+    const root = await fetch(`${baseUrl}/profile/card`);
     assert.strictEqual(root.status, 200,
       '--single-user with no name should default to a root pod');
     // Check the filesystem directly — an HTTP-only check could pass
     // on a 401 even if /me/ data was somehow seeded, which would
     // hide the regression we care about (root vs /me/ pod).
-    assert.strictEqual(await fs.pathExists(path.join(DEFAULT_DATA_DIR, 'me/profile/card.jsonld')), false,
+    assert.strictEqual(await fs.pathExists(path.join(DEFAULT_DATA_DIR, 'me/profile/card')), false,
       'no /me/ pod files should be created when singleUserName is unset');
     assert.strictEqual(await fs.pathExists(path.join(DEFAULT_DATA_DIR, 'me/profile/card')), false,
       'no legacy /me/ pod files should be created either');
   });
 
   it('WebID resolves at the server origin', async () => {
-    const res = await fetch(`${baseUrl}/profile/card.jsonld`);
+    const res = await fetch(`${baseUrl}/profile/card`);
     const body = await res.json();
-    const webId = `${baseUrl}/profile/card.jsonld#me`;
+    const webId = `${baseUrl}/profile/card#me`;
     const matches = Array.isArray(body)
       ? body.some(n => n['@id'] === webId)
       : body['@id'] === webId || (body['@graph'] || []).some(n => n['@id'] === webId);
@@ -966,7 +966,7 @@ describe('Identity Provider — single-user password seeding (#323)', () => {
       const account = await findByUsername('me');
       assert.ok(account, 'IDP account for single-user "me" should exist');
       assert.strictEqual(account.username, 'me');
-      assert.ok(account.webId.includes('/me/profile/card.jsonld#me'));
+      assert.ok(account.webId.includes('/me/profile/card#me'));
       const authed = await authenticate('me', 'hunter2-test');
       assert.ok(authed, 'should authenticate with the seeded password');
     } finally {
@@ -999,7 +999,7 @@ describe('Identity Provider — single-user password seeding (#323)', () => {
       const account = await findByUsername('me');
       assert.strictEqual(account, null, 'no account should be seeded without a password');
       // Pod itself must still exist — server starts up regardless.
-      const profileExists = await fs.pathExists(path.join(dir, 'me/profile/card.jsonld'));
+      const profileExists = await fs.pathExists(path.join(dir, 'me/profile/card'));
       assert.ok(profileExists, 'pod should still be created');
     } finally {
       await server.close();
@@ -1047,7 +1047,7 @@ describe('Identity Provider — single-user password seeding (#323)', () => {
   it('seeds with the legacy WebID when /profile/card (no .jsonld) already exists', async () => {
     // Older JSS versions used /profile/card without the extension. A
     // legacy pod must keep that URL — seeding an account whose WebID
-    // points at /profile/card.jsonld#me would create a credential bound
+    // points at /profile/card#me would create a credential bound
     // to a document the user doesn't actually have.
     const dir = './test-data-su-pw-legacy';
     await fs.remove(dir);

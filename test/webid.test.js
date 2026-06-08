@@ -29,8 +29,8 @@ describe('WebID Profile', () => {
   });
 
   describe('Profile Document', () => {
-    // Profile is now a plain JSON-LD doc at /pod/profile/card.jsonld.
-    const profilePath = '/webidtest/profile/card.jsonld';
+    // Profile is now a plain JSON-LD doc at /pod/profile/card.
+    const profilePath = '/webidtest/profile/card';
 
     it('should serve profile as JSON-LD', async () => {
       const res = await request(profilePath);
@@ -122,8 +122,8 @@ describe('WebID Profile', () => {
       const res = await request(profilePath);
       const jsonLd = await res.json();
 
-      assert.ok(jsonLd['@id'].endsWith('/webidtest/profile/card.jsonld#me'),
-        `WebID should end with /profile/card.jsonld#me, got ${jsonLd['@id']}`);
+      assert.ok(jsonLd['@id'].endsWith('/webidtest/profile/card#me'),
+        `WebID should end with /profile/card#me, got ${jsonLd['@id']}`);
     });
 
     it('should have foaf:name', async () => {
@@ -207,7 +207,7 @@ describe('WebID Profile', () => {
   });
 
   describe('WebID Resolution', () => {
-    const profilePath = '/webidtest/profile/card.jsonld';
+    const profilePath = '/webidtest/profile/card';
 
     it('should return LDP headers', async () => {
       const res = await request(profilePath);
@@ -249,7 +249,7 @@ describe('WebID Profile — Turtle conneg (#320)', () => {
     // class on the pod's host.
     const { generateProfile } = await import('../src/webid/profile.js');
     const { fromJsonLd } = await import('../src/rdf/conneg.js');
-    const webId = 'https://example.test/profile/card.jsonld#me';
+    const webId = 'https://example.test/profile/card#me';
     const profile = generateProfile({
       webId,
       name: 'mk-test',
@@ -294,7 +294,7 @@ describe('WebID Profile — Turtle conneg (#320)', () => {
   });
 
   it('Turtle variant includes cid:service with lws:OpenIdProvider and serviceEndpoint', async () => {
-    const res = await request('/webidturtletest/profile/card.jsonld', {
+    const res = await request('/webidturtletest/profile/card', {
       headers: { Accept: 'text/turtle' }
     });
     assertStatus(res, 200);

@@ -36,7 +36,7 @@ describe('Pod Lifecycle', () => {
 
       const data = await res.json();
       assert.strictEqual(data.name, 'alice');
-      assert.ok(data.webId.endsWith('/alice/profile/card.jsonld#me'));
+      assert.ok(data.webId.endsWith('/alice/profile/card#me'));
       assert.ok(data.podUri.endsWith('/alice/'));
     });
 

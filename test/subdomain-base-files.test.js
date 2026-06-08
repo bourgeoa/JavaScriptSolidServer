@@ -67,11 +67,11 @@ describe('buildResourceUrl — pod routing still works', () => {
     assert.strictEqual(buildResourceUrl(req, '/alice'), 'https://alice.example.com/');
   });
 
-  it('base-domain /alice/profile/card.jsonld — rewrites to alice.example.com/profile/card.jsonld', () => {
+  it('base-domain /alice/profile/card — rewrites to alice.example.com/profile/card', () => {
     const req = makeRequest({ hostname: baseDomain, baseDomain });
     assert.strictEqual(
-      buildResourceUrl(req, '/alice/profile/card.jsonld'),
-      'https://alice.example.com/profile/card.jsonld'
+      buildResourceUrl(req, '/alice/profile/card'),
+      'https://alice.example.com/profile/card'
     );
   });
 
@@ -82,8 +82,8 @@ describe('buildResourceUrl — pod routing still works', () => {
       podName: 'alice'
     });
     assert.strictEqual(
-      buildResourceUrl(req, '/profile/card.jsonld'),
-      'https://alice.example.com/profile/card.jsonld'
+      buildResourceUrl(req, '/profile/card'),
+      'https://alice.example.com/profile/card'
     );
   });
 });

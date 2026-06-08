@@ -119,7 +119,7 @@ describe('round-trip optimization reader — emission (#346)', () => {
 describe('round-trip optimization reader — interaction with data island (#346)', () => {
   it('reader and data island both present when JSON-LD payload supplied', () => {
     const html = generateDatabrowserHtml(
-      'https://test.solid.social/profile/card.jsonld',
+      'https://test.solid.social/profile/card',
       '2.0.0',
       { embedJsonLd: '{"@id":"#me","foaf:name":"Alice"}' }
     );

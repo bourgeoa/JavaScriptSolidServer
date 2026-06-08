@@ -155,7 +155,7 @@ export async function activityPubPlugin(fastify, options = {}) {
   const getActorId = (request, userConfig) => {
     const protocol = getProtocol(request)
     const host = getActorHost(request, userConfig)
-    return `${protocol}://${host}/profile/card.jsonld#me`
+    return `${protocol}://${host}/profile/card#me`
   }
 
   // Helper to get base URL
@@ -243,8 +243,8 @@ export async function activityPubPlugin(fastify, options = {}) {
 
     const baseUrl = getBaseUrl(request)
     const actorBaseUrl = getBaseUrl(request, true, matchedUser)
-    const actorUrl = `${actorBaseUrl}/profile/card.jsonld#me`
-    const profileUrl = `${actorBaseUrl}/profile/card.jsonld`
+    const actorUrl = `${actorBaseUrl}/profile/card#me`
+    const profileUrl = `${actorBaseUrl}/profile/card`
 
     const response = webfinger.createResponse(
       `${username}@${parsed.domain}`,
@@ -344,9 +344,9 @@ export async function activityPubPlugin(fastify, options = {}) {
     return createCollectionsHandler(uc)(request, reply, type)
   }
 
-  fastify.post('/profile/card.jsonld/inbox', inboxDispatch)
-  fastify.get('/profile/card.jsonld/outbox', outboxDispatch)
-  fastify.post('/profile/card.jsonld/outbox', outboxPostDispatch)
+  fastify.post('/profile/card/inbox', inboxDispatch)
+  fastify.get('/profile/card/outbox', outboxDispatch)
+  fastify.post('/profile/card/outbox', outboxPostDispatch)
   fastify.get('/posts/:id', postObjectDispatch)
   fastify.get('/profile/avatar.png', async (request, reply) => {
     const uc = getUserConfig(request)
@@ -376,8 +376,8 @@ export async function activityPubPlugin(fastify, options = {}) {
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgNfQh8EAAAAASUVORK5CYII=', 'base64')
     return reply.header('Content-Type', 'image/png').send(png)
   })
-  fastify.get('/profile/card.jsonld/followers', (req, reply) => collectionsDispatch(req, reply, 'followers'))
-  fastify.get('/profile/card.jsonld/following', (req, reply) => collectionsDispatch(req, reply, 'following'))
+  fastify.get('/profile/card/followers', (req, reply) => collectionsDispatch(req, reply, 'followers'))
+  fastify.get('/profile/card/following', (req, reply) => collectionsDispatch(req, reply, 'following'))
 
   // Mastodon-compatible API endpoints
   const streamingDispatch = (connection, request) => {

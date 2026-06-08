@@ -2,7 +2,7 @@
  * WebID Profile generation
  *
  * Creates profile documents following Solid conventions. Default profile
- * shape is now plain JSON-LD at `profile/card.jsonld` — operators who
+ * shape is now plain JSON-LD at `profile/card` — operators who
  * want a human-readable HTML shell can serve their own `index.html` with
  * an embedded `<script type="application/ld+json">` data island.
  */

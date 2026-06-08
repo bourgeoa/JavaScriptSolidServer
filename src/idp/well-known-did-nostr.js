@@ -304,12 +304,12 @@ export function profilePathFromWebId(dataRoot, webId, accountId = 'unknown') {
  * Build the candidate filesystem paths to probe for a given WebID,
  * covering the deployment shapes JSS supports:
  *
- *   1. Path-mode named pod  (host=`example.com`, path=`/alice/profile/card.jsonld`)
- *      → `<dataRoot>/alice/profile/card.jsonld`
- *   2. Root pod (single-user) (host=`example.com`, path=`/profile/card.jsonld`)
- *      → `<dataRoot>/profile/card.jsonld`
- *   3. Subdomain-mode pod   (host=`alice.example.com`, path=`/profile/card.jsonld`)
- *      → `<dataRoot>/alice/profile/card.jsonld`
+ *   1. Path-mode named pod  (host=`example.com`, path=`/alice/profile/card`)
+ *      → `<dataRoot>/alice/profile/card`
+ *   2. Root pod (single-user) (host=`example.com`, path=`/profile/card`)
+ *      → `<dataRoot>/profile/card`
+ *   3. Subdomain-mode pod   (host=`alice.example.com`, path=`/profile/card`)
+ *      → `<dataRoot>/alice/profile/card`
  *
  * The subdomain candidate (3) is gated on `podName` matching the
  * WebID host's first DNS label — without that gate, a root-pod

@@ -258,7 +258,7 @@ describe('MCP server (--mcp enabled)', () => {
   it('write_acl + read_acl round-trip', async () => {
     const auths = [
       {
-        agents: ['/mcptest/profile/card.jsonld#me'],
+        agents: ['/mcptest/profile/card#me'],
         modes: ['Read', 'Write', 'Control'],
         isDefault: true
       },
@@ -360,7 +360,7 @@ describe('MCP server (--mcp enabled)', () => {
           path: '/mcptest/private/federation/',
           authorizations: [
             {
-              agents: ['/mcptest/profile/card.jsonld#me'],
+              agents: ['/mcptest/profile/card#me'],
               modes: ['Read', 'Write', 'Control'],
               isDefault: true
             }

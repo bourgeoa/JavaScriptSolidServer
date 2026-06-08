@@ -156,7 +156,7 @@ describe('GET /idp/account/export — multi-user', () => {
     assert.strictEqual(manifest.podName, 'alice');
     assert.strictEqual(manifest.mode, 'multi-user');
     assert.match(manifest.exportedAt, /^\d{4}-\d{2}-\d{2}T/);
-    assert.match(manifest.webId, /alice\/profile\/card\.jsonld#me$/);
+    assert.match(manifest.webId, /alice\/profile\/card#me$/);
 
     // Account record present, sans passwordHash.
     assert.ok(files['jss-export/account.json'], 'account.json must be present');
@@ -169,7 +169,7 @@ describe('GET /idp/account/export — multi-user', () => {
     // Pod tree contents — at minimum the seeded files.
     const podKeys = Object.keys(files).filter(k => k.startsWith('jss-export/pod/'));
     assert.ok(podKeys.length > 0, 'pod tree must be packed');
-    assert.ok(podKeys.some(k => k.endsWith('profile/card.jsonld')),
+    assert.ok(podKeys.some(k => k.endsWith('profile/card')),
       'WebID profile must be in the export');
     assert.ok(podKeys.some(k => k.endsWith('.acl')),
       'ACL files must be in the export');
@@ -312,7 +312,7 @@ describe('GET /idp/account/export — single-user ROOT pod (denylist check)', ()
 
     // Sanity: actual pod content IS in the archive.
     const podKeys = Object.keys(files).filter(k => k.startsWith('jss-export/pod/'));
-    assert.ok(podKeys.some(k => k.endsWith('profile/card.jsonld')),
+    assert.ok(podKeys.some(k => k.endsWith('profile/card')),
       'pod content must still be exported');
     assert.ok(podKeys.some(k => k.endsWith('private/privkey.jsonld')),
       'pod /private/ must still be exported (this is pod data, not server-internal)');
@@ -386,7 +386,7 @@ describe('GET /idp/account/export — single-user with --provision-keys', () => 
     // account record exists, matching the multi-user manifest shape so
     // a downstream importer doesn't see different shapes per server mode.
     assert.strictEqual(manifest.username, 'me');
-    assert.match(manifest.webId, /me\/profile\/card\.jsonld#me$/);
+    assert.match(manifest.webId, /me\/profile\/card#me$/);
     assert.ok(manifest.createdAt, 'manifest.createdAt must be populated from the seeded account');
 
     // The on-disk secret must be in the archive — Credible Exit
@@ -399,7 +399,7 @@ describe('GET /idp/account/export — single-user with --provision-keys', () => 
       `/private/privkey.jsonld must be in the archive (Credible Exit). Pod entries: ${podKeys.join(', ')}`
     );
     // And the WebID profile carrying the public side.
-    assert.ok(podKeys.some(k => k.endsWith('profile/card.jsonld')));
+    assert.ok(podKeys.some(k => k.endsWith('profile/card')));
   });
 
   it('rejects an authenticated third-party WebID with 403', async () => {
@@ -416,7 +416,7 @@ describe('GET /idp/account/export — single-user with --provision-keys', () => 
     // We mint the third-party token with createToken (same HMAC
     // SECRET the server uses) so verifyToken accepts the signature
     // and getWebIdFromRequestAsync resolves to the foreign WebID.
-    const intruderWebId = 'http://attacker.example.com/profile/card.jsonld#me';
+    const intruderWebId = 'http://attacker.example.com/profile/card#me';
     const intruderToken = createToken(intruderWebId, 3600);
     const res = await fetch(`${baseUrl}/idp/account/export`, {
       headers: { Authorization: `Bearer ${intruderToken}` }

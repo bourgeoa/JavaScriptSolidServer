@@ -95,7 +95,7 @@ describe('publicKeyMultibase / secretKeyMultibase', () => {
 
 describe('buildOwnerKeyDocument', () => {
   const args = {
-    controllerWebId: 'https://alice.example/profile/card.jsonld#me',
+    controllerWebId: 'https://alice.example/profile/card#me',
     publicHex: '87a1c6f0e9b3d2456789abcdef0123456789abcdef0123456789abcdef012345',
     secretHex: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
   };
@@ -164,7 +164,7 @@ describe('buildOwnerKeyDocument', () => {
 });
 
 describe('provisionOwnerKey', () => {
-  const webId = 'https://alice.example/profile/card.jsonld#me';
+  const webId = 'https://alice.example/profile/card#me';
 
   it('returns the document together with raw key material for CLI display', () => {
     const out = provisionOwnerKey({ webId });
@@ -186,7 +186,7 @@ describe('provisionOwnerKey', () => {
     const out = provisionOwnerKey({ webId });
     assert.strictEqual(out.vm['@type'], 'Multikey');
     assert.strictEqual(out.vm.controller, webId);
-    assert.strictEqual(out.vm['@id'], 'https://alice.example/profile/card.jsonld#owner-key');
+    assert.strictEqual(out.vm['@id'], 'https://alice.example/profile/card#owner-key');
     assert.strictEqual(out.vm.publicKeyMultibase, out.publicMultibase);
     assert.strictEqual(out.vm.publicKeyJwk.kty, 'EC');
     assert.strictEqual(out.vm.publicKeyJwk.crv, 'secp256k1');

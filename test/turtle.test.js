@@ -103,15 +103,15 @@ describe('turtle converter — unit (#320 follow-ups)', () => {
         controller: { '@id': 'cid:controller', '@type': '@id' },
         publicKeyMultibase: { '@id': 'cid:publicKeyMultibase' },
       },
-      '@id': 'https://example.test/profile/card.jsonld#me',
+      '@id': 'https://example.test/profile/card#me',
       verificationMethod: [{
         // Aliases — `id`/`type`, not `@id`/`@type`.
-        id: 'https://example.test/profile/card.jsonld#k',
+        id: 'https://example.test/profile/card#k',
         type: 'Multikey',
-        controller: 'https://example.test/profile/card.jsonld#me',
+        controller: 'https://example.test/profile/card#me',
         publicKeyMultibase: 'fe70102de7ec',
       }],
-      authentication: ['https://example.test/profile/card.jsonld#k'],
+      authentication: ['https://example.test/profile/card#k'],
     };
     const { content } = await fromJsonLd(doc, 'text/turtle', 'https://example.test/', true);
 
@@ -119,7 +119,7 @@ describe('turtle converter — unit (#320 follow-ups)', () => {
     assert.match(content, /cid:verificationMethod|<https:\/\/www\.w3\.org\/ns\/cid\/v1#verificationMethod>/,
       `cid:verificationMethod predicate missing from Turtle:\n${content}`);
     // The VM resource must be described — its type, controller, key.
-    assert.ok(content.includes('https://example.test/profile/card.jsonld#k'),
+    assert.ok(content.includes('https://example.test/profile/card#k'),
       `VM #k must appear in Turtle:\n${content}`);
     assert.match(content, /Multikey|<https:\/\/www\.w3\.org\/ns\/cid\/v1#Multikey>/,
       `Multikey type missing from Turtle:\n${content}`);

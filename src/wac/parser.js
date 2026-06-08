@@ -219,7 +219,7 @@ function normalizeMode(mode) {
  * If the WebID isn't hosted under this pod (foreign owner), the absolute
  * URI is returned unchanged — there's no in-pod path to resolve to. This
  * also means the helper degrades gracefully for any current or future
- * profile layout (modern `profile/card.jsonld#me`, legacy `profile/card#me`,
+ * profile layout (modern `profile/card#me`, legacy `profile/card#me`,
  * single-file `me#me`, etc.) — whatever path the WebID actually has under
  * the pod is what gets emitted.
  *
@@ -275,7 +275,7 @@ export function generatePublicReadAcl(resourceUrl) {
  * @param {string} resourceUrl - URL of the resource. May be relative (see
  *   `generatePublicReadAcl`).
  * @param {string} ownerWebId - WebID of the owner. May also be relative
- *   (e.g. './profile/card.jsonld#me' for an in-pod owner) — the parser
+ *   (e.g. './profile/card#me' for an in-pod owner) — the parser
  *   resolves it against the .acl URL at check time. The profile document
  *   itself still publishes the absolute WebID. See #430.
  * @param {boolean} isContainer - Whether this is a container

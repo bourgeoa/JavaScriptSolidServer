@@ -33,7 +33,7 @@ export function createActorHandler(config, keypair) {
     }
     protocol = protocol || request.protocol
     const baseUrl = `${protocol}://${host}`
-    const profileUrl = `${baseUrl}/profile/card.jsonld`
+    const profileUrl = `${baseUrl}/profile/card`
     const actorId = `${profileUrl}#me`
 
     const actor = {

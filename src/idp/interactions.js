@@ -574,13 +574,13 @@ export async function handleRegisterPost(request, reply, issuer, inviteOnly = fa
 
     let podUri, webId;
     if (subdomainsEnabled && baseDomain) {
-      // Subdomain mode: alice.example.com/profile/card.jsonld#me
+      // Subdomain mode: alice.example.com/profile/card#me
       podUri = `${request.protocol}://${username}.${baseDomain}/`;
-      webId = `${podUri}profile/card.jsonld#me`;
+      webId = `${podUri}profile/card#me`;
     } else {
-      // Path mode: example.com/alice/profile/card.jsonld#me
+      // Path mode: example.com/alice/profile/card#me
       podUri = `${baseUrl}/${username}/`;
-      webId = `${podUri}profile/card.jsonld#me`;
+      webId = `${podUri}profile/card#me`;
     }
 
     // Check if pod already exists

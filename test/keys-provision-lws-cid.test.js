@@ -25,8 +25,8 @@ import { verifyLwsCidAuth, _clearProfileCacheForTests } from '../src/auth/lws-ci
 
 const POD_ORIGIN = 'https://alice.example';
 const POD_URI = `${POD_ORIGIN}/`;
-const WEBID = `${POD_URI}profile/card.jsonld#me`;
-const DOC_URL = `${POD_URI}profile/card.jsonld`;
+const WEBID = `${POD_URI}profile/card#me`;
+const DOC_URL = `${POD_URI}profile/card`;
 const ISSUER = `${POD_ORIGIN}/`;
 
 function b64u(bytes) {

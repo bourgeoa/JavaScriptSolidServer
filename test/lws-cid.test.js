@@ -51,8 +51,8 @@ function makeRequest(token, { host = 'example.com', proto = 'https' } = {}) {
   };
 }
 
-const WEBID = 'https://example.com/profile/card.jsonld#me';
-const DOC_URL = 'https://example.com/profile/card.jsonld';
+const WEBID = 'https://example.com/profile/card#me';
+const DOC_URL = 'https://example.com/profile/card';
 const VM_ID = `${DOC_URL}#nostr-key-1`;
 const POD_ORIGIN = 'https://example.com';
 
@@ -236,7 +236,7 @@ describe('verifyLwsCidAuth', () => {
   });
 
   it('rejects when kid is in a different document than sub', async () => {
-    const otherKid = 'https://other.example/profile/card.jsonld#k1';
+    const otherKid = 'https://other.example/profile/card#k1';
     const token = makeJwt({
       privKey: priv,
       header: { alg: 'ES256K', kid: otherKid },
@@ -501,7 +501,7 @@ describe('verifyLwsCidAuth', () => {
     // and reuse a VM controlled by bob.
     nextProfile = {
       ...buildProfile(jwk),
-      '@id': 'https://example.com/profile/card.jsonld#bob',
+      '@id': 'https://example.com/profile/card#bob',
     };
     const token = makeJwt({
       privKey: priv,
@@ -532,8 +532,8 @@ describe('verifyLwsCidAuth', () => {
   });
 
   it('rejects http: kid early with a clear message (not a generic SSRF failure)', async () => {
-    const httpKid = 'http://example.com/profile/card.jsonld#k1';
-    const httpSub = 'http://example.com/profile/card.jsonld#me';
+    const httpKid = 'http://example.com/profile/card#k1';
+    const httpSub = 'http://example.com/profile/card#me';
     const token = makeJwt({
       privKey: priv,
       header: { alg: 'ES256K', kid: httpKid },
@@ -548,7 +548,7 @@ describe('verifyLwsCidAuth', () => {
     // explicit default port). Profile @id is canonical. After
     // canonicalization, both should match and the returned webId is
     // canonical (so downstream WAC ACL string matching works).
-    const noncanonical = 'HTTPS://Example.COM:443/profile/card.jsonld#me';
+    const noncanonical = 'HTTPS://Example.COM:443/profile/card#me';
     const token = makeJwt({
       privKey: priv,
       header: { alg: 'ES256K', kid: VM_ID },
@@ -567,7 +567,7 @@ describe('verifyLwsCidAuth', () => {
     // JWT carries a non-canonical kid (uppercase scheme + host,
     // explicit default port); the profile's VM id is canonical.
     // After URL-parse normalization both should match.
-    const nonCanonicalKid = 'HTTPS://Example.COM:443/profile/card.jsonld#nostr-key-1';
+    const nonCanonicalKid = 'HTTPS://Example.COM:443/profile/card#nostr-key-1';
     const token = makeJwt({
       privKey: priv,
       header: { alg: 'ES256K', kid: nonCanonicalKid },
@@ -599,7 +599,7 @@ describe('verifyLwsCidAuth', () => {
   it('refuses cross-origin redirect during profile fetch', async () => {
     urlResponses.set(DOC_URL, {
       status: 302,
-      headers: { location: 'https://attacker.example/profile/card.jsonld' },
+      headers: { location: 'https://attacker.example/profile/card' },
     });
     const token = makeJwt({
       privKey: priv,
@@ -646,7 +646,7 @@ describe('verifyLwsCidAuth', () => {
   });
 
   it('SSRF: rejects kid pointing at localhost', async () => {
-    const localKid = 'https://localhost/profile/card.jsonld#me';
+    const localKid = 'https://localhost/profile/card#me';
     const token = makeJwt({
       privKey: priv,
       header: { alg: 'ES256K', kid: localKid },

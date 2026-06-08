@@ -543,13 +543,13 @@ function getOwnerWebIdCandidates(request, protectedUrl) {
     const podName = pathSegments[0];
     return [
       `${origin}/${podName}/profile/card.jsonld#me`,
-      `${origin}/${podName}/profile/card#me`
+      `${origin}/${podName}/profile/card.jsonld#me`
     ];
   }
 
   // Subdomain mode and single-user mode use an origin-scoped profile.
   return [
     `${origin}/profile/card.jsonld#me`,
-    `${origin}/profile/card#me`
+    `${origin}/profile/card.jsonld#me`
   ];
 }

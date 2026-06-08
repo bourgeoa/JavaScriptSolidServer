@@ -121,7 +121,7 @@ describe('getBaseDomainHost', () => {
 describe('getContentType', () => {
   describe('extension-based mapping (existing)', () => {
     it('maps .jsonld → application/ld+json', () => {
-      assert.strictEqual(getContentType('/x/card.jsonld'), 'application/ld+json');
+      assert.strictEqual(getContentType('/x/card$.jsonld'), 'application/ld+json');
     });
     it('maps .ttl → text/turtle', () => {
       assert.strictEqual(getContentType('/x/card.ttl'), 'text/turtle');

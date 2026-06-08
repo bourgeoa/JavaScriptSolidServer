@@ -253,7 +253,7 @@ describe('WAC Parser', () => {
   // verbatim so callers can emit host-portable ACLs. The parser already
   // resolves them at check time against the .acl's URL.
   describe('relative resourceUrl portability (#428)', () => {
-    const webId = 'https://alice.example/profile/card.jsonld#me';
+    const webId = 'https://alice.example/profile/card#me';
 
     it('generateOwnerAcl preserves "./" in accessTo and default', () => {
       const acl = generateOwnerAcl('./', webId, true);
@@ -302,41 +302,41 @@ describe('WAC Parser', () => {
     // owner half of the rule too. The parser already resolves relative
     // agents (PR #65 / #64) — this just exercises the writer side.
     it('generateOwnerAcl preserves a relative ownerWebId (#430)', () => {
-      const acl = generateOwnerAcl('./', './profile/card.jsonld#me', true);
+      const acl = generateOwnerAcl('./', './profile/card#me', true);
       const owner = acl['@graph'].find(a => a['@id'] === '#owner');
-      assert.strictEqual(owner['acl:agent']['@id'], './profile/card.jsonld#me');
+      assert.strictEqual(owner['acl:agent']['@id'], './profile/card#me');
     });
 
     it('generatePrivateAcl preserves a relative ownerWebId (#430)', () => {
-      const acl = generatePrivateAcl('./', '../profile/card.jsonld#me');
-      assert.strictEqual(acl['@graph'][0]['acl:agent']['@id'], '../profile/card.jsonld#me');
+      const acl = generatePrivateAcl('./', '../profile/card#me');
+      assert.strictEqual(acl['@graph'][0]['acl:agent']['@id'], '../profile/card#me');
     });
 
     it('generateInboxAcl preserves a relative ownerWebId (#430)', () => {
-      const acl = generateInboxAcl('./', '../profile/card.jsonld#me');
+      const acl = generateInboxAcl('./', '../profile/card#me');
       const owner = acl['@graph'].find(a => a['@id'] === '#owner');
-      assert.strictEqual(owner['acl:agent']['@id'], '../profile/card.jsonld#me');
+      assert.strictEqual(owner['acl:agent']['@id'], '../profile/card#me');
     });
 
     it('generatePublicFolderAcl preserves a relative ownerWebId (#430)', () => {
-      const acl = generatePublicFolderAcl('./', './card.jsonld#me');
+      const acl = generatePublicFolderAcl('./', './card#me');
       const owner = acl['@graph'].find(a => a['@id'] === '#owner');
-      assert.strictEqual(owner['acl:agent']['@id'], './card.jsonld#me');
+      assert.strictEqual(owner['acl:agent']['@id'], './card#me');
     });
 
     it('round-trip: relative ownerWebId resolves to .acl base URL on parse (#430)', async () => {
       // Same ACL document, two hosts — agent should resolve to whichever
       // host asked, just like accessTo. This is what makes the on-disk
       // pod portable for the owner half.
-      const generated = generateOwnerAcl('./', './profile/card.jsonld#me', true);
+      const generated = generateOwnerAcl('./', './profile/card#me', true);
       const wire = serializeAcl(generated);
       const auths1 = await parseAcl(wire, 'http://localhost:4444/.acl');
       const auths2 = await parseAcl(wire, 'http://0.0.0.0:4444/.acl');
       const owner1 = auths1.find(a => a.id === '#owner');
       const owner2 = auths2.find(a => a.id === '#owner');
-      assert.ok(owner1.agents.includes('http://localhost:4444/profile/card.jsonld#me'),
+      assert.ok(owner1.agents.includes('http://localhost:4444/profile/card#me'),
         `Expected localhost agent, got: ${JSON.stringify(owner1.agents)}`);
-      assert.ok(owner2.agents.includes('http://0.0.0.0:4444/profile/card.jsonld#me'),
+      assert.ok(owner2.agents.includes('http://0.0.0.0:4444/profile/card#me'),
         `Expected 0.0.0.0 agent, got: ${JSON.stringify(owner2.agents)}`);
     });
 
@@ -347,15 +347,15 @@ describe('WAC Parser', () => {
 
       it('emits "./<tail>" from the pod root', () => {
         assert.strictEqual(
-          relativizeOwnerWebId(`${podUri}profile/card.jsonld#me`, podUri, ''),
-          './profile/card.jsonld#me'
+          relativizeOwnerWebId(`${podUri}profile/card#me`, podUri, ''),
+          './profile/card#me'
         );
       });
 
       it('emits "../<tail>" from an immediate child folder', () => {
         assert.strictEqual(
-          relativizeOwnerWebId(`${podUri}profile/card.jsonld#me`, podUri, 'private/'),
-          '../profile/card.jsonld#me'
+          relativizeOwnerWebId(`${podUri}profile/card#me`, podUri, 'private/'),
+          '../profile/card#me'
         );
       });
 
@@ -384,7 +384,7 @@ describe('WAC Parser', () => {
       });
 
       it('returns the absolute WebID unchanged for foreign owners', () => {
-        const foreign = 'https://other.example/profile/card.jsonld#me';
+        const foreign = 'https://other.example/profile/card#me';
         assert.strictEqual(
           relativizeOwnerWebId(foreign, podUri, ''),
           foreign
@@ -400,8 +400,8 @@ describe('WAC Parser', () => {
         // yields the original absolute WebID. Covers both modern and
         // legacy layouts, from root and from a child folder.
         const cases = [
-          { web: `${podUri}profile/card.jsonld#me`, base: '',         acl: `${podUri}.acl` },
-          { web: `${podUri}profile/card.jsonld#me`, base: 'private/', acl: `${podUri}private/.acl` },
+          { web: `${podUri}profile/card#me`, base: '',         acl: `${podUri}.acl` },
+          { web: `${podUri}profile/card#me`, base: 'private/', acl: `${podUri}private/.acl` },
           { web: `${podUri}profile/card#me`,        base: '',         acl: `${podUri}.acl` },
           { web: `${podUri}profile/card#me`,        base: 'private/', acl: `${podUri}private/.acl` },
           { web: `${podUri}me#me`,                  base: 'public/',  acl: `${podUri}public/.acl` }
@@ -421,15 +421,15 @@ describe('WAC Parser', () => {
     });
 
     it('round-trip: relative ownerWebId from a child folder resolves correctly (#430)', async () => {
-      // /pod/private/.acl with agent '../profile/card.jsonld#me'
-      // should resolve to /pod/profile/card.jsonld#me, not into the
+      // /pod/private/.acl with agent '../profile/card#me'
+      // should resolve to /pod/profile/card#me, not into the
       // pod root or escape it.
-      const generated = generatePrivateAcl('./', '../profile/card.jsonld#me');
+      const generated = generatePrivateAcl('./', '../profile/card#me');
       const wire = serializeAcl(generated);
       const auths = await parseAcl(wire, 'http://localhost:4444/alice/private/.acl');
       const owner = auths.find(a => a.id === '#owner');
-      assert.ok(owner.agents.includes('http://localhost:4444/alice/profile/card.jsonld#me'),
-        `Expected resolution to /alice/profile/card.jsonld#me, got: ${JSON.stringify(owner.agents)}`);
+      assert.ok(owner.agents.includes('http://localhost:4444/alice/profile/card#me'),
+        `Expected resolution to /alice/profile/card#me, got: ${JSON.stringify(owner.agents)}`);
     });
 
     it('round-trip: relative "./" resolves to the .acl base URL on parse', async () => {

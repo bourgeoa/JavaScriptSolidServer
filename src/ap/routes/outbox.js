@@ -53,7 +53,7 @@ export function createOutboxHandler(config, keypair) {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
     const host = request.headers['x-forwarded-host'] || request.hostname
     const baseUrl = `${protocol}://${host}`
-    const profileUrl = `${baseUrl}/profile/card.jsonld`
+    const profileUrl = `${baseUrl}/profile/card`
     const actorId = `${profileUrl}#me`
 
     const posts = getPosts(config.username, 20)
@@ -97,7 +97,7 @@ export function createOutboxPostHandler(config, keypair) {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
     const host = request.headers['x-forwarded-host'] || request.hostname
     const baseUrl = `${protocol}://${host}`
-    const profileUrl = `${baseUrl}/profile/card.jsonld`
+    const profileUrl = `${baseUrl}/profile/card`
     const actorId = `${profileUrl}#me`
 
     // Parse body
@@ -188,7 +188,7 @@ export function createPostObjectHandler(config) {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
     const host = request.headers['x-forwarded-host'] || request.hostname
     const baseUrl = `${protocol}://${host}`
-    const profileUrl = `${baseUrl}/profile/card.jsonld`
+    const profileUrl = `${baseUrl}/profile/card`
     const actorId = `${profileUrl}#me`
 
     // Stored post IDs are full URLs. Try direct URL match first, then fallback.

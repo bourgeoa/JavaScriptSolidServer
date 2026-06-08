@@ -695,7 +695,7 @@ function buildAccount (username, baseUrl) {
     group: false,
     created_at: startedAt,
     note: '',
-    url: `${accountBaseUrl}/profile/card.jsonld`,
+    url: `${accountBaseUrl}/profile/card`,
     avatar: `${accountBaseUrl}/profile/avatar.png`,
     avatar_static: `${accountBaseUrl}/profile/avatar.png`,
     header: `${accountBaseUrl}/profile/header.png`,
@@ -1023,13 +1023,13 @@ function deriveActorFromPostUrl (statusId) {
     const pathParts = parsed.pathname.split('/').filter(Boolean)
     if (pathParts.length < 2 || pathParts[0] !== 'posts') return null
 
-    // In subdomain mode: bob.example.org/posts/uuid -> actor bob.example.org/profile/card.jsonld#me
+    // In subdomain mode: bob.example.org/posts/uuid -> actor bob.example.org/profile/card#me
     const hostParts = parsed.hostname.split('.')
     if (hostParts.length < 2) return null
     const actorBase = `${parsed.protocol}//${parsed.host}`
     return {
-      actorId: `${actorBase}/profile/card.jsonld#me`,
-      inbox: `${actorBase}/profile/card.jsonld/inbox`
+      actorId: `${actorBase}/profile/card#me`,
+      inbox: `${actorBase}/profile/card/inbox`
     }
   } catch {
     return null
@@ -1183,7 +1183,7 @@ export function createFavouriteStatusHandler (getUserConfig) {
     const localPost = resolvePostByStatusId(rawId, baseUrl)
 
     // Best-effort AP Like delivery for remote posts.
-    const requesterActorId = `${baseUrl}/profile/card.jsonld#me`
+    const requesterActorId = `${baseUrl}/profile/card#me`
     const requesterConfig = typeof getUserConfig === 'function' ? getUserConfig(request) : {}
     const requesterKeypair = requesterConfig?.keypair
     const remoteTarget = deriveActorFromPostUrl(targetStatusId)
@@ -1586,20 +1586,20 @@ export function createFollowAccountHandler (getUserConfig) {
     // Build actor URLs — in subdomain mode use subdomain-style, otherwise path-based
     let targetActorId, requesterActorId, requesterInbox
     if (subdomains && baseDomain) {
-      requesterActorId = `${protocol}://${username}.${baseDomain}/profile/card.jsonld#me`
-      requesterInbox = `${protocol}://${username}.${baseDomain}/profile/card.jsonld/inbox`
+      requesterActorId = `${protocol}://${username}.${baseDomain}/profile/card#me`
+      requesterInbox = `${protocol}://${username}.${baseDomain}/profile/card/inbox`
     } else {
-      requesterActorId = `${protocol}://${host}/${username}/profile/card.jsonld#me`
-      requesterInbox = `${protocol}://${host}/${username}/profile/card.jsonld/inbox`
+      requesterActorId = `${protocol}://${host}/${username}/profile/card#me`
+      requesterInbox = `${protocol}://${host}/${username}/profile/card/inbox`
     }
 
     let remoteInbox = null
     if (isLocalTarget) {
       const targetUsername = targetParsed.username
       if (subdomains && baseDomain) {
-        targetActorId = `${protocol}://${targetUsername}.${baseDomain}/profile/card.jsonld#me`
+        targetActorId = `${protocol}://${targetUsername}.${baseDomain}/profile/card#me`
       } else {
-        targetActorId = `${protocol}://${host}/${targetUsername}/profile/card.jsonld#me`
+        targetActorId = `${protocol}://${host}/${targetUsername}/profile/card#me`
       }
     } else {
       const remote = await resolveRemoteAccount(targetParsed)
@@ -1673,7 +1673,7 @@ export function createGetNotificationsHandler (getUserConfig) {
     const followers = getFollowers(currentUsername)
     const notifications = followers
       .map((f, i) => {
-        // actor may be "https://bob.host/profile/card.jsonld#me" — strip fragment first
+        // actor may be "https://bob.host/profile/card#me" — strip fragment first
         let actorUrl = f.actor || ''
         try { actorUrl = actorUrl.split('#')[0] } catch { /* keep */ }
         // Use getUsernameFromWebId which handles both subdomain and path-based WebIDs
