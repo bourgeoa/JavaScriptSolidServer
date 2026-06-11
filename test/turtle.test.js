@@ -64,6 +64,45 @@ describe('turtle converter — unit (#320 follow-ups)', () => {
     assert.ok(/30|"30"/.test(content), `Turtle should contain the age claim, got:\n${content}`);
   });
 
+  it('top-level @graph ACL documents emit their triples (#dotfile conneg)', async () => {
+    const doc = {
+      '@context': {
+        acl: 'http://www.w3.org/ns/auth/acl#',
+        foaf: 'http://xmlns.com/foaf/0.1/'
+      },
+      '@graph': [
+        {
+          '@id': '#owner',
+          '@type': 'acl:Authorization',
+          'acl:agent': { '@id': '../profile/card#me' },
+          'acl:accessTo': { '@id': './' },
+          'acl:default': { '@id': './' },
+          'acl:mode': [
+            { '@id': 'acl:Read' },
+            { '@id': 'acl:Write' },
+            { '@id': 'acl:Control' }
+          ]
+        },
+        {
+          '@id': '#public',
+          '@type': 'acl:Authorization',
+          'acl:agentClass': { '@id': 'foaf:Agent' },
+          'acl:accessTo': { '@id': './' },
+          'acl:default': { '@id': './' },
+          'acl:mode': [{ '@id': 'acl:Read' }]
+        }
+      ]
+    };
+
+    const { content } = await fromJsonLd(doc, 'text/turtle', 'https://example.test/alice/public/.acl', true);
+    assert.match(content, /#owner/, `owner authorization should appear in Turtle, got:\n${content}`);
+    assert.match(content, /#public/, `public authorization should appear in Turtle, got:\n${content}`);
+    assert.match(content, /acl:Authorization|<http:\/\/www\.w3\.org\/ns\/auth\/acl#Authorization>/,
+      `ACL authorization type should appear in Turtle, got:\n${content}`);
+    assert.match(content, /acl:accessTo|<http:\/\/www\.w3\.org\/ns\/auth\/acl#accessTo>/,
+      `acl:accessTo triple should appear in Turtle, got:\n${content}`);
+  });
+
   it('prefix-looking context key defined as an object is not string-concatenated', async () => {
     // A user-supplied context can legally define a prefix-looking key as a
     // term-definition object (not a namespace string). The converter must

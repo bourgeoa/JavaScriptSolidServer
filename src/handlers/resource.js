@@ -38,6 +38,44 @@ const RDF_CACHE_CONTROL = 'private, no-cache, must-revalidate';
 // can't drift apart silently.
 const EXPLICIT_JSON_RE = /\b(application\/ld\+json|application\/json)\b/i;
 
+// Under --conneg, extensionless RDF resource URLs default to Turtle when
+// the client does not explicitly ask for JSON. Affected examples:
+//   /profile/card
+//   /alice/public/noext
+//   /alice/public/.meta
+//   /alice/public/.acl
+//   /alice/public/resource.acl
+//   /alice/public/resource.meta
+// Not affected:
+//   /alice/public/file.jsonld   (has extension)
+//   /alice/public/file.ttl      (explicit extension)
+function prefersTurtleForExtensionlessRdf(urlPath, acceptHeader, connegEnabled) {
+  if (!connegEnabled) return false;
+  const p = urlPath || '';
+  if (!p || p.endsWith('/')) return false;
+
+  const lastSegment = p.split('/').filter(Boolean).pop() || '';
+  const isSolidAclMeta =
+    lastSegment === '.acl'
+    || lastSegment === '.meta'
+    || lastSegment.endsWith('.acl')
+    || lastSegment.endsWith('.meta');
+
+  // Treat Solid convention RDF dotfiles as extensionless RDF resources.
+  // This keeps defaults consistent with other extensionless RDF URLs under
+  // --conneg while still honoring explicit JSON Accept below.
+  if (lastSegment.startsWith('.') && !isSolidAclMeta) return false;
+
+  if (!isSolidAclMeta && lastSegment.includes('.')) return false;
+
+  if (EXPLICIT_JSON_RE.test(acceptHeader || '')) return false;
+
+  // For generic Accept values (or no Accept), prefer Turtle for
+  // extensionless RDF resources under --conneg.
+  const accept = (acceptHeader || '').toLowerCase();
+  return !accept || accept.includes('*/*');
+}
+
 /**
  * Inject live reload script into HTML content
  */
@@ -536,7 +574,8 @@ export async function handleGet(request, reply) {
     const wantsTurtle = urlPath.endsWith('.ttl')
       || negotiated === RDF_TYPES.TURTLE
       || negotiated === RDF_TYPES.N3
-      || negotiated === 'application/n-triples';
+      || negotiated === 'application/n-triples'
+      || prefersTurtleForExtensionlessRdf(urlPath, acceptHeader, connegEnabled);
 
     // Check if this is HTML with JSON-LD data island
     const isHtmlWithDataIsland = contentStr.trimStart().startsWith('<!DOCTYPE') ||
@@ -638,7 +677,7 @@ export async function handleGet(request, reply) {
  * Handle HEAD request
  */
 export async function handleHead(request, reply) {
-  let { storagePath, resourceUrl } = getRequestPaths(request);
+  let { urlPath, storagePath, resourceUrl } = getRequestPaths(request);
   let stats = await storage.stat(storagePath);
 
   if (!stats) {
@@ -707,7 +746,23 @@ export async function handleHead(request, reply) {
     const { willServeMashlib, effectiveEtag } = getMashlibEtag(request, stats, storagePath);
     headEtag = effectiveEtag;
     isMashlibResponse = willServeMashlib;
-    contentType = willServeMashlib ? 'text/html' : getContentType(storagePath);
+    if (willServeMashlib) {
+      contentType = 'text/html';
+    } else {
+      const storedContentType = getContentType(storagePath);
+      if (connegEnabled && isRdfContentType(storedContentType)) {
+        const acceptHeader = request.headers.accept || '';
+        const negotiated = selectContentType(acceptHeader, true);
+        const wantsTurtle = urlPath.endsWith('.ttl')
+          || negotiated === RDF_TYPES.TURTLE
+          || negotiated === RDF_TYPES.N3
+          || negotiated === 'application/n-triples'
+          || prefersTurtleForExtensionlessRdf(urlPath, acceptHeader, connegEnabled);
+        contentType = wantsTurtle ? 'text/turtle' : 'application/ld+json';
+      } else {
+        contentType = storedContentType;
+      }
+    }
   }
 
   // Check If-None-Match using the final ETag (#456)

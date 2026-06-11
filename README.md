@@ -97,6 +97,30 @@ Key options: `--port`, `--idp`, `--conneg`, `--mashlib`, `--git`, `--nostr`, `--
 
 Full options: [docs/configuration.md](docs/configuration.md)
 
+## Conneg Default For Extensionless RDF URLs
+
+When `--conneg` is enabled, JSS now defaults extensionless RDF resource URLs to Turtle unless JSON is explicitly requested.
+
+- Affected URL shapes:
+  - `/profile/card`
+  - `/<pod>/.../<name-without-extension>` (for RDF resources)
+- Not affected:
+  - URLs with an explicit extension (for example `.jsonld`, `.ttl`)
+  - Non-RDF files/content
+
+Solid RDF dotfiles (`.acl`, `.meta`) are treated as extensionless RDF resources
+under `--conneg`: they default to Turtle unless JSON is explicitly requested.
+
+Examples:
+
+```bash
+# Defaults to Turtle under --conneg
+curl -i http://localhost:4443/alice/profile/card
+
+# Explicitly request JSON-LD
+curl -i -H "Accept: application/ld+json" http://localhost:4443/alice/profile/card
+```
+
 ## Documentation
 
 | Topic | Link |

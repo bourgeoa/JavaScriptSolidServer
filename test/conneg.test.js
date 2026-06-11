@@ -98,6 +98,47 @@ describe('Content Negotiation (conneg enabled)', () => {
       const vary = res.headers.get('Vary');
       assert.ok(vary && vary.includes('Accept'), 'Should have Vary: Accept');
     });
+
+    it('defaults extensionless RDF resources to Turtle under conneg', async () => {
+      const data = {
+        '@context': { 'schema': 'http://schema.org/' },
+        '@id': '#thing',
+        'schema:name': 'NoExt'
+      };
+
+      await request('/connegtest/public/noext', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/ld+json' },
+        body: JSON.stringify(data),
+        auth: 'connegtest'
+      });
+
+      const res = await request('/connegtest/public/noext');
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
+    });
+
+    it('serves JSON-LD for extensionless RDF when explicitly requested', async () => {
+      const res = await request('/connegtest/public/noext', {
+        headers: { 'Accept': 'application/ld+json' }
+      });
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'application/ld+json');
+    });
+
+    it('defaults WebID profile /profile/card to Turtle under conneg', async () => {
+      const res = await request('/connegtest/profile/card');
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
+    });
+
+    it('serves JSON-LD for /profile/card when explicitly requested', async () => {
+      const res = await request('/connegtest/profile/card', {
+        headers: { 'Accept': 'application/ld+json' }
+      });
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'application/ld+json');
+    });
   });
 
   describe('PUT with Content-Type', () => {
@@ -224,9 +265,8 @@ describe('Content Negotiation (conneg enabled)', () => {
   });
 
   // Regression coverage for #294 — Solid convention dotfiles (.acl, .meta)
-  // were excluded from conneg because getContentType() returned
-  // application/octet-stream for them. Turtle-native clients (umai etc.)
-  // fetching <container>/.meta got JSON-LD back and errored on parse.
+  // now follow the same default-Turtle behavior as other extensionless RDF
+  // resources under --conneg, unless JSON is explicitly requested.
   describe('Solid convention dotfiles (#294)', () => {
     const metaData = {
       '@context': { 'ldp': 'http://www.w3.org/ns/ldp#' },
@@ -244,10 +284,10 @@ describe('Content Negotiation (conneg enabled)', () => {
       });
     });
 
-    it('serves .meta as JSON-LD by default', async () => {
+    it('serves .meta as Turtle by default under conneg', async () => {
       const res = await request('/connegtest/public/.meta', { auth: 'connegtest' });
       assertStatus(res, 200);
-      assertHeaderContains(res, 'Content-Type', 'application/ld+json');
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
     });
 
     it('serves .meta as Turtle when Accept: text/turtle (the umai case)', async () => {
@@ -327,6 +367,23 @@ describe('Content Negotiation (conneg enabled)', () => {
       });
       assertStatus(getRes, 200);
       assertHeaderContains(getRes, 'Content-Type', 'application/ld+json');
+    });
+
+    it('serves .acl as Turtle by default under conneg', async () => {
+      const res = await request('/connegtest/public/turtle-accept.acl', {
+        auth: 'connegtest'
+      });
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
+    });
+
+    it('serves .acl as JSON-LD when explicitly requested', async () => {
+      const res = await request('/connegtest/public/turtle-accept.acl', {
+        headers: { 'Accept': 'application/ld+json' },
+        auth: 'connegtest'
+      });
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'application/ld+json');
     });
 
     it('accepts text/n3 PUT to .acl when conneg is enabled', async () => {
