@@ -999,7 +999,10 @@ describe('Identity Provider — single-user password seeding (#323)', () => {
       const account = await findByUsername('me');
       assert.strictEqual(account, null, 'no account should be seeded without a password');
       // Pod itself must still exist — server starts up regardless.
-      const profileExists = await fs.pathExists(path.join(dir, 'me/profile/card'));
+      const profileExists =
+        await fs.pathExists(path.join(dir, 'me/profile/card$.jsonld')) ||
+        await fs.pathExists(path.join(dir, 'me/profile/card.jsonld')) ||
+        await fs.pathExists(path.join(dir, 'me/profile/card'));
       assert.ok(profileExists, 'pod should still be created');
     } finally {
       await server.close();

@@ -87,8 +87,16 @@ describe('NIP-05 MVP — single-user with provisioned key', () => {
     const onDisk = JSON.parse(
       await fs.readFile(`${DATA_DIR}/.well-known/nostr.json`, 'utf8')
     );
+    const profilePathCandidates = [
+      `${DATA_DIR}/profile/card$.jsonld`,
+      `${DATA_DIR}/profile/card.jsonld`,
+      `${DATA_DIR}/profile/card`,
+    ];
+    const profilePath = (await Promise.all(profilePathCandidates.map(p => fs.pathExists(p))))
+      .map((exists, i) => (exists ? profilePathCandidates[i] : null))
+      .find(Boolean) || profilePathCandidates[0];
     const profile = JSON.parse(
-      await fs.readFile(`${DATA_DIR}/profile/card`, 'utf8')
+      await fs.readFile(profilePath, 'utf8')
     );
     const vm = profile.verificationMethod[0];
     assert.ok(vm.publicKeyMultibase.includes(onDisk.names._),

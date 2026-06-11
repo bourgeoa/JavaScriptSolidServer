@@ -542,14 +542,14 @@ function getOwnerWebIdCandidates(request, protectedUrl) {
   if (!request.subdomainsEnabled && !request.singleUser && pathSegments.length > 0 && !pathSegments[0].startsWith('.')) {
     const podName = pathSegments[0];
     return [
-      `${origin}/${podName}/profile/card.jsonld#me`,
-      `${origin}/${podName}/profile/card.jsonld#me`
+      `${origin}/${podName}/profile/card#me`,
+      `${origin}/${podName}/profile/card#me`
     ];
   }
 
   // Subdomain mode and single-user mode use an origin-scoped profile.
   return [
-    `${origin}/profile/card.jsonld#me`,
-    `${origin}/profile/card.jsonld#me`
+    `${origin}/profile/card#me`,
+    `${origin}/profile/card#me`
   ];
 }

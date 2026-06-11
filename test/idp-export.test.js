@@ -169,7 +169,11 @@ describe('GET /idp/account/export — multi-user', () => {
     // Pod tree contents — at minimum the seeded files.
     const podKeys = Object.keys(files).filter(k => k.startsWith('jss-export/pod/'));
     assert.ok(podKeys.length > 0, 'pod tree must be packed');
-    assert.ok(podKeys.some(k => k.endsWith('profile/card')),
+    assert.ok(podKeys.some(k =>
+      k.endsWith('profile/card$.jsonld') ||
+      k.endsWith('profile/card.jsonld') ||
+      k.endsWith('profile/card')
+    ),
       'WebID profile must be in the export');
     assert.ok(podKeys.some(k => k.endsWith('.acl')),
       'ACL files must be in the export');
@@ -312,7 +316,11 @@ describe('GET /idp/account/export — single-user ROOT pod (denylist check)', ()
 
     // Sanity: actual pod content IS in the archive.
     const podKeys = Object.keys(files).filter(k => k.startsWith('jss-export/pod/'));
-    assert.ok(podKeys.some(k => k.endsWith('profile/card')),
+    assert.ok(podKeys.some(k =>
+      k.endsWith('profile/card$.jsonld') ||
+      k.endsWith('profile/card.jsonld') ||
+      k.endsWith('profile/card')
+    ),
       'pod content must still be exported');
     assert.ok(podKeys.some(k => k.endsWith('private/privkey.jsonld')),
       'pod /private/ must still be exported (this is pod data, not server-internal)');
@@ -399,7 +407,11 @@ describe('GET /idp/account/export — single-user with --provision-keys', () => 
       `/private/privkey.jsonld must be in the archive (Credible Exit). Pod entries: ${podKeys.join(', ')}`
     );
     // And the WebID profile carrying the public side.
-    assert.ok(podKeys.some(k => k.endsWith('profile/card')));
+    assert.ok(podKeys.some(k =>
+      k.endsWith('profile/card$.jsonld') ||
+      k.endsWith('profile/card.jsonld') ||
+      k.endsWith('profile/card')
+    ));
   });
 
   it('rejects an authenticated third-party WebID with 403', async () => {

@@ -31,6 +31,7 @@ import { tunnelPlugin } from './tunnel/index.js';
 import { terminalPlugin } from './terminal/index.js';
 import { registerErrorHandler } from './utils/error-handler.js';
 import { getBaseDomainHost } from './utils/url.js';
+import { urlToStoragePath, resolveDollarPath } from './utils/dollar-escape.js';
 import { seedServerRoot } from './ui/server-root.js';
 import { assertProvisionKeysCompatible } from './keys/provision.js';
 
@@ -899,19 +900,16 @@ export function createServer(options = {}) {
       const podUri = isRootPod ? `${baseUrl}/` : `${baseUrl}/${singleUserName}/`;
       const displayName = isRootPod ? 'me' : singleUserName;
 
-      // Check if pod already exists. Accept either the new `card`
-      // or legacy extensionless `card` layout so we don't re-seed a pod
-      // that was created by an older JSS version. Compute the effective
-      // WebID against whichever profile file actually resolves — a
-      // legacy pod must keep its `/profile/card#me` WebID, otherwise the
-      // seeded IDP account would point at a non-existent document.
-      const hasJsonLd = await storage.exists(`${podPath}profile/card`);
-      const hasLegacy = !hasJsonLd && await storage.exists(`${podPath}profile/card`);
-      const profileFile = hasJsonLd ? 'profile/card'
-                          : hasLegacy ? 'profile/card'
-                          : 'profile/card'; // fresh pod default
-      const webId = `${podUri}${profileFile}#me`;
-      const profileExists = hasJsonLd || hasLegacy;
+      // Check if pod already exists using the canonical logical profile URL
+      // (`/profile/card`) resolved against all supported on-disk variants
+      // (`card$.jsonld`, legacy `card.jsonld`, older `card`).
+      const logicalProfilePath = `${podPath}profile/card`;
+      const resolvedProfilePath = await resolveDollarPath(
+        logicalProfilePath,
+        (p) => storage.stat(p)
+      );
+      const profileExists = !!(await storage.stat(resolvedProfilePath));
+      const webId = `${podUri}profile/card#me`;
 
       if (!profileExists) {
         fastify.log.info(`Creating single-user pod at ${podUri}...`);
@@ -1219,7 +1217,10 @@ export function createServer(options = {}) {
     // verificationMethod when --provision-keys is on). Written last —
     // see ordering rationale above.
     const profile = generateProfile({ webId, name: displayName, podUri, issuer, ownerVm: ownerKey?.vm });
-    await storage.write('/profile/card', serialize(profile));
+    await storage.write(
+      urlToStoragePath('/profile/card', 'application/ld+json'),
+      serialize(profile)
+    );
 
     // Note: Quota not initialized for root-level pods (no user directory).
     // Spread `ownerKey` only when set so the field is genuinely absent

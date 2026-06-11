@@ -8,6 +8,7 @@ import { provisionOwnerKey, assertProvisionKeysCompatible } from '../keys/provis
 import { createToken } from '../auth/token.js';
 import { canAcceptInput, toJsonLd, RDF_TYPES } from '../rdf/conneg.js';
 import { emitChange } from '../notifications/events.js';
+import { urlToStoragePath } from '../utils/dollar-escape.js';
 
 /**
  * Get the storage path and resource URL for a request
@@ -223,7 +224,7 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
   // The owner WebID is also written relatively (#430), derived from the
   // absolute `webId` and the .acl's location within the pod by
   // `relativizeOwnerWebId`. This works for any profile layout (modern
-  // `profile/card.jsonld#me`, legacy `profile/card.jsonld#me`, custom shapes) and
+  // `profile/card#me`, legacy `profile/card.jsonld#me`, custom shapes) and
   // falls back to the absolute WebID for foreign owners. Together this
   // keeps the on-disk pod portable across hostnames.
   const owner = aclBase => relativizeOwnerWebId(webId, podUri, aclBase);
@@ -295,7 +296,10 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
   // JWTs signed with the matching secret. Profile is intentionally
   // written last — see ordering rationale above.
   const profile = generateProfile({ webId, name, podUri, issuer, ownerVm: ownerKey?.vm });
-  await storage.write(`${podPath}profile/card.jsonld`, serialize(profile));
+  await storage.write(
+    urlToStoragePath(`${podPath}profile/card`, RDF_TYPES.JSON_LD),
+    serialize(profile)
+  );
 
   // Spread `ownerKey` only when set so the field is genuinely absent
   // (not `null`) on the no-provisioning path — matches the existing
@@ -379,17 +383,17 @@ export async function handleCreatePod(request, reply) {
 
   let baseUri, podUri, webId;
   if (subdomainsEnabled && baseDomain) {
-    // Subdomain mode: alice.example.com:port/profile/card.jsonld#me
+    // Subdomain mode: alice.example.com:port/profile/card#me
     // baseDomain may include port (e.g. "example.com:3100")
     const podHost = `${name}.${baseDomain}`;
     baseUri = `${request.protocol}://${baseDomain}`;
     podUri = `${request.protocol}://${podHost}/`;
-    webId = `${podUri}profile/card.jsonld#me`;
+    webId = `${podUri}profile/card#me`;
   } else {
-    // Path mode: example.com/alice/profile/card.jsonld#me
+    // Path mode: example.com/alice/profile/card#me
     baseUri = `${request.protocol}://${request.hostname}`;
     podUri = `${baseUri}${podPath}`;
-    webId = `${podUri}profile/card.jsonld#me`;
+    webId = `${podUri}profile/card#me`;
   }
 
   // Issuer needs trailing slash for CTH compatibility

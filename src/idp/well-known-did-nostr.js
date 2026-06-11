@@ -24,6 +24,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { findById } from './accounts.js';
 import { extractNostrPubkeysFromProfile } from '../auth/nostr-keys.js';
+import { resolveDollarPath } from '../utils/dollar-escape.js';
 
 // In-memory pubkey → resolved-account-record index. Built lazily
 // from disk; rebuilt when the TTL expires. Real production wants
@@ -155,9 +156,16 @@ async function rebuildPubkeyIndex() {
     let profile = null;
     let mtimeMs = 0;
     for (const candidate of candidates) {
+      const resolved = await resolveDollarPath(candidate, async (p) => {
+        try {
+          return await fs.stat(p);
+        } catch {
+          return null;
+        }
+      });
       let stat;
       try {
-        stat = await fs.stat(candidate);
+        stat = await fs.stat(resolved);
       } catch (err) {
         reasons.push(`${candidate}: ${err.code || 'stat-error'}`);
         continue;
@@ -178,7 +186,7 @@ async function rebuildPubkeyIndex() {
       }
       let parsed;
       try {
-        parsed = JSON.parse(await fs.readFile(candidate, 'utf8'));
+        parsed = JSON.parse(await fs.readFile(resolved, 'utf8'));
       } catch (err) {
         reasons.push(`${candidate}: parse-error (${err.message})`);
         continue;

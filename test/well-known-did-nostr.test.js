@@ -43,8 +43,23 @@ function fformMultikey(xOnlyHex, parity = '02') {
   return 'f' + 'e701' + parity + xOnlyHex.toLowerCase();
 }
 
+async function resolveProfilePath(rootDir, podName = null) {
+  const profileDir = podName
+    ? path.join(rootDir, podName, 'profile')
+    : path.join(rootDir, 'profile');
+  const candidates = [
+    path.join(profileDir, 'card$.jsonld'),
+    path.join(profileDir, 'card.jsonld'),
+    path.join(profileDir, 'card'),
+  ];
+  for (const candidate of candidates) {
+    if (await fs.pathExists(candidate)) return candidate;
+  }
+  return candidates[0];
+}
+
 async function patchProfileWithMultikey(podName, pubkey) {
-  const profilePath = path.join(TEST_DATA_DIR, podName, 'profile', 'card');
+  const profilePath = await resolveProfilePath(TEST_DATA_DIR, podName);
   const profile = await fs.readJson(profilePath);
   const VM_ID = `${profile['@id'].replace('#me', '')}#nostr-key-1`;
   profile.verificationMethod = [{
@@ -265,7 +280,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     const sk = generateSecretKey();
     const rootPk = getPublicKey(sk);
     const rootWebId = `${baseUrl}/profile/card#me`;
-    const rootProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card');
+    const rootProfilePath = await resolveProfilePath(TEST_DATA_DIR);
     const VM_ID = `${baseUrl}/profile/card#nostr-root`;
     await fs.ensureDir(path.dirname(rootProfilePath));
     await fs.writeJson(rootProfilePath, {
@@ -330,12 +345,12 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // this test runs. Without this snapshot, deleting the decoy
     // unconditionally would silently wipe legitimate state.
     const decoyPk = getPublicKey(generateSecretKey()); // unrelated key
-    const decoyProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card');
+    const decoyProfilePath = await resolveProfilePath(TEST_DATA_DIR);
     const decoyWebId = `${baseUrl}/profile/card#decoy`;
     const sk = generateSecretKey();
     const subPk = getPublicKey(sk);
     const subWebId = 'http://sub.example.test/profile/card#me';
-    const subProfilePath = path.join(TEST_DATA_DIR, 'sub', 'profile', 'card');
+    const subProfilePath = await resolveProfilePath(TEST_DATA_DIR, 'sub');
     const VM_ID = 'http://sub.example.test/profile/card#k';
     const accountsDir = path.join(TEST_DATA_DIR, '.idp', 'accounts');
     const indexPath = path.join(accountsDir, '_webid_index.json');
@@ -446,7 +461,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // the DID doc is published.
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card');
+    const profilePath = await resolveProfilePath(TEST_DATA_DIR, 'alice');
     const profile = await fs.readJson(profilePath);
     const absSubject = profile['@id'];           // e.g. http://.../alice/profile/card#me
     const absSubjectNoHash = absSubject.replace('#me', '');
@@ -498,7 +513,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
       webId: orphanWebId,
     }, { spaces: 2 });
     // Write a malformed profile so JSON.parse will throw.
-    const profilePath = path.join(TEST_DATA_DIR, 'orphan', 'profile', 'card');
+    const profilePath = await resolveProfilePath(TEST_DATA_DIR, 'orphan');
     await fs.ensureDir(path.dirname(profilePath));
     await fs.writeFile(profilePath, '{ this is not valid json', 'utf8');
 
@@ -530,7 +545,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // Index must respect that intent.
     const otherSk = generateSecretKey();
     const otherPk = getPublicKey(otherSk);
-    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card');
+    const profilePath = await resolveProfilePath(TEST_DATA_DIR, 'alice');
     const profile = await fs.readJson(profilePath);
     const REVOKED_VM_ID = `${profile['@id'].replace('#me', '')}#nostr-revoked`;
     profile.verificationMethod.push({
@@ -686,16 +701,16 @@ describe('profilePathFromWebId — DATA_ROOT containment', () => {
   // directly with raw inputs that bypass URL parsing's `..`
   // normalization, since that's the layer that would matter if a
   // future caller ever bypassed `new URL()`.
-  const DATA_ROOT = '/srv/jss/data';
+  const DATA_ROOT = path.resolve('/srv/jss/data');
 
   it('resolves a normal pathname under dataRoot', () => {
     const p = profilePathFromWebId(DATA_ROOT, 'http://example/alice/profile/card#me');
-    assert.strictEqual(p, '/srv/jss/data/alice/profile/card');
+    assert.strictEqual(p, path.join(DATA_ROOT, 'alice', 'profile', 'card'));
   });
 
   it('resolves a root-pod pathname under dataRoot', () => {
     const p = profilePathFromWebId(DATA_ROOT, 'http://example/profile/card#me');
-    assert.strictEqual(p, '/srv/jss/data/profile/card');
+    assert.strictEqual(p, path.join(DATA_ROOT, 'profile', 'card'));
   });
 
   it('rejects unparseable webIds', () => {
@@ -708,7 +723,7 @@ describe('profilePathFromWebId — DATA_ROOT containment', () => {
     // WHATWG URL parsing already strips this — confirm the result
     // stays inside dataRoot regardless.
     const p = profilePathFromWebId(DATA_ROOT, 'http://example/../../../etc/passwd');
-    assert.ok(p === null || p.startsWith('/srv/jss/data'),
+    assert.ok(p === null || p.startsWith(DATA_ROOT + path.sep) || p === DATA_ROOT,
       `expected containment, got ${p}`);
   });
 
