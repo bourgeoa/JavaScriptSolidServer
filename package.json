@@ -1,6 +1,6 @@
 {
   "name": "javascript-solid-server",
-  "version": "0.0.205",
+  "version": "0.0.207",
   "description": "A minimal, fast Solid server",
   "main": "src/index.js",
   "type": "module",
@@ -52,7 +52,12 @@
     "decentralized",
     "activitypub",
     "fediverse",
-    "nostr"
+    "nostr",
+    "json-ld",
+    "webid",
+    "mcp",
+    "agent",
+    "agentic"
   ],
   "license": "AGPL-3.0-only",
   "optionalDependencies": {

@@ -17,12 +17,13 @@ import { idpPlugin } from './idp/index.js';
 // below so non-IdP deployments don't pull in the IdP accounts module
 // (bcryptjs etc.) just to register Fastify routes. The same lazy-load
 // pattern is used in src/auth/nostr.js for the NIP-98 verifier.
-import { isGitRequest, isGitWriteOperation, handleGit } from './handlers/git.js';
+import { isGitRequest, isGitWriteOperation, handleGit, setGitCorsHeaders } from './handlers/git.js';
 import { handleCorsProxy, isCorsProxyRequest, setProxyCorsHeaders } from './handlers/cors-proxy.js';
 import { AccessMode } from './wac/parser.js';
 import { registerNostrRelay } from './nostr/relay.js';
 import { createPayHandler, isPayRequest } from './handlers/pay.js';
 import { activityPubPlugin, getActorHandler } from './ap/index.js';
+import { defaults, parseSize } from './config.js';
 import { remoteStoragePlugin } from './remotestorage.js';
 import { dbPlugin } from './db/index.js';
 import { mcpPlugin } from './mcp/index.js';
@@ -183,14 +184,24 @@ export function createServer(options = {}) {
 
   // Fastify options
   const loggerEnabled = options.logger ?? true;
+  // Resolve bodyLimit from options. Numbers (programmatic, or env values
+  // already coerced by parseEnvValue) pass through unchanged; strings
+  // ("100MB" from CLI / config files) go through parseSize for
+  // size-shorthand support. The typeof check matters because parseSize
+  // calls `.match` on its input and would throw on a raw number. Default
+  // matches the previous hard-coded 10 MiB cap. See #474.
+  const bodyLimit = options.bodyLimit == null
+    ? defaults.bodyLimit
+    : (typeof options.bodyLimit === 'number' ? options.bodyLimit : parseSize(options.bodyLimit));
   const fastifyOptions = {
     logger: loggerEnabled ? { level: options.logLevel || 'info' } : false,
     disableRequestLogging: true,
     trustProxy: true,
     // Force close connections on server.close() (useful for tests with WebSockets)
     forceCloseConnections: options.forceCloseConnections ?? false,
-    // Handle raw body for non-JSON content
-    bodyLimit: 10 * 1024 * 1024, // 10MB
+    // Cap raw body size (see resolution above; configurable via
+    // --body-limit / JSS_BODY_LIMIT / createServer({ bodyLimit })).
+    bodyLimit,
     // Gracefully handle client TCP errors (ECONNRESET, EPIPE, etc.)
     clientErrorHandler: (err, socket) => {
       if (err.code === 'ECONNRESET' || err.code === 'EPIPE' || err.code === 'ECONNABORTED') {
@@ -528,11 +539,20 @@ export function createServer(options = {}) {
       request.wacAllow = wacAllow;
 
       if (paymentRequired) {
+        // Git CORS headers on the early return — same reasoning as the
+        // 401/403 below: a browser git client must see the 402, not a
+        // generic CORS/network error. See #548 / #371.
+        setGitCorsHeaders(reply);
         return reply.code(402).send({ type: 'PaymentRequired', ...paymentRequired });
       }
 
       if (!authorized) {
         const message = needsWrite ? 'Write access required for push' : 'Read access required for clone';
+        // Without the git CORS headers, browser-based git clients (e.g.
+        // jss.live/git/) hitting an auth-gated repo saw a generic CORS
+        // error instead of this 401/403 — the same failure mode #371
+        // fixed inside handleGit. See #548.
+        setGitCorsHeaders(reply);
         reply.header('WAC-Allow', wacAllow);
         if (!webId) {
           // No authentication - request Basic auth for git clients
@@ -887,7 +907,7 @@ export function createServer(options = {}) {
       // Determine base URL for pod URIs
       const protocol = options.ssl ? 'https' : 'http';
       const host = options.host === '0.0.0.0' ? 'localhost' : (options.host || 'localhost');
-      const port = options.port || 3000;
+      const port = options.port || defaults.port;
       const baseUrl = idpIssuer?.replace(/\/$/, '') || `${protocol}://${host}:${port}`;
       const issuer = idpIssuer || `${baseUrl}/`;
 
@@ -1232,7 +1252,7 @@ export function createServer(options = {}) {
     const dataRoot = options.root || process.env.DATA_ROOT || './data';
     const protocol = options.ssl ? 'https' : 'http';
     // Use configured port, or default; actual URL will be localhost
-    const port = options.port || 3000;
+    const port = options.port || defaults.port;
     const baseUrl = `${protocol}://localhost:${port}`;
     startFileWatcher(dataRoot, baseUrl);
   }
@@ -1243,7 +1263,7 @@ export function createServer(options = {}) {
 /**
  * Start the server
  */
-export async function startServer(port = 3000, host = '0.0.0.0') {
+export async function startServer(port = defaults.port, host = '0.0.0.0') {
   const server = createServer();
 
   try {
