@@ -351,15 +351,23 @@ export function profilePathCandidates(dataRoot, webId, podName = null) {
     }
     if (!paths.includes(r)) paths.push(r);
   };
+  const subdomainMatch =
+    typeof podName === 'string' && podName.length > 0 &&
+    url.hostname.toLowerCase().startsWith(podName.toLowerCase() + '.');
+  const isPodRoot = pathnameRel === '' || pathnameRel.endsWith('/');
+
   // Path-mode named pod OR root pod.
   consider(pathnameRel);
-  // Subdomain mode: only when the WebID host's first DNS label
-  // matches the account's podName (case-insensitive — DNS is).
-  if (typeof podName === 'string' && podName.length > 0) {
-    const host = url.hostname.toLowerCase();
-    const expected = podName.toLowerCase() + '.';
-    if (host.startsWith(expected)) {
-      consider(podName, pathnameRel);
+  // Pod-root WebIDs (`/` or `/alice/`) need a conventional profile
+  // probe under that directory. Keep this off subdomain-match hosts to
+  // avoid cross-account root-profile bleed.
+  if (isPodRoot && !subdomainMatch) {
+    consider(pathnameRel, 'profile/card');
+  }
+  if (subdomainMatch) {
+    consider(podName, pathnameRel);
+    if (isPodRoot) {
+      consider(podName, pathnameRel, 'profile/card');
     }
   }
   return { paths, skipped };

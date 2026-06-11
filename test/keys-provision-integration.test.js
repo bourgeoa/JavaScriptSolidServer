@@ -84,6 +84,19 @@ describe('POST /.pods — provisionKeys: true (Phase 1 of #437)', () => {
   });
 
   it('writes the secret with file mode 0o600 (POSIX defence-in-depth)', { skip: process.platform === 'win32' }, async () => {
+    // Some mounted filesystems (e.g. drvfs without metadata) report
+    // 0777 regardless of chmod. Probe capability first to avoid
+    // false negatives in those environments.
+    const probePath = path.join('./data', '.mode-probe');
+    await fs.writeFile(probePath, 'x');
+    await fs.chmod(probePath, 0o600);
+    const probeStat = await fs.stat(probePath);
+    await fs.remove(probePath);
+    const probeMode = probeStat.mode & 0o777;
+    if (probeMode !== 0o600) {
+      return;
+    }
+
     const filePath = path.join('./data', 'keyowner', 'private', 'privkey.jsonld');
     const stat = await fs.stat(filePath);
     // Strip the file-type bits (0o170000) and assert the perm bits.
