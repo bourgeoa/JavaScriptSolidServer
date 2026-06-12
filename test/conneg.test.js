@@ -244,10 +244,10 @@ describe('Content Negotiation (conneg enabled)', () => {
       });
     });
 
-    it('serves .meta as JSON-LD by default', async () => {
+    it('serves .meta as Turtle by default under conneg', async () => {
       const res = await request('/connegtest/public/.meta', { auth: 'connegtest' });
       assertStatus(res, 200);
-      assertHeaderContains(res, 'Content-Type', 'application/ld+json');
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
     });
 
     it('serves .meta as Turtle when Accept: text/turtle (the umai case)', async () => {
@@ -327,6 +327,23 @@ describe('Content Negotiation (conneg enabled)', () => {
       });
       assertStatus(getRes, 200);
       assertHeaderContains(getRes, 'Content-Type', 'application/ld+json');
+    });
+
+    it('serves .acl as Turtle by default under conneg', async () => {
+      const res = await request('/connegtest/public/turtle-accept.acl', {
+        auth: 'connegtest'
+      });
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
+    });
+
+    it('serves .acl as JSON-LD when explicitly requested', async () => {
+      const res = await request('/connegtest/public/turtle-accept.acl', {
+        headers: { 'Accept': 'application/ld+json' },
+        auth: 'connegtest'
+      });
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'application/ld+json');
     });
 
     it('accepts text/n3 PUT to .acl when conneg is enabled', async () => {

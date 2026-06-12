@@ -29,6 +29,14 @@ const LIVE_RELOAD_SCRIPT = `<script>(function(){var ws=new WebSocket((location.p
 // where a cached data variant was served on top-level navigation (#315).
 const RDF_CACHE_CONTROL = 'private, no-cache, must-revalidate';
 
+// Under conneg-read, these URL suffixes are treated as Turtle-first resources
+// when the client doesn't explicitly ask for another RDF serialization.
+const TURTLE_DEFAULT_SUFFIXES = ['.ttl', '.acl', '.meta'];
+
+function prefersTurtleByUrl(urlPath) {
+  return TURTLE_DEFAULT_SUFFIXES.some(suffix => urlPath.endsWith(suffix));
+}
+
 // Detects when the request's Accept header explicitly names a JSON
 // media type. Used by the container/index.html branches of GET and HEAD
 // to decide whether to surface the embedded JSON-LD data island —
@@ -519,11 +527,13 @@ export async function handleGet(request, reply) {
   if (connegEnabled) {
     const contentStr = content.toString();
     const acceptHeader = request.headers.accept || '';
-    // Serve Turtle if: URL ends with .ttl OR Accept's q-weighted top
+    // Serve Turtle if: URL is Turtle-first (.ttl/.acl/.meta) and JSON was
+    // not explicitly requested, OR Accept's q-weighted top
     // RDF type is Turtle/N3 (#325 — naive substring matching ignored
     // q-weights and would pick Turtle whenever it appeared in Accept).
     const negotiated = selectContentType(acceptHeader, true);
-    const wantsTurtle = urlPath.endsWith('.ttl')
+    const wantsTurtleByUrl = prefersTurtleByUrl(urlPath) && !EXPLICIT_JSON_RE.test(acceptHeader);
+    const wantsTurtle = wantsTurtleByUrl
       || negotiated === RDF_TYPES.TURTLE
       || negotiated === RDF_TYPES.N3
       || negotiated === 'application/n-triples';
@@ -562,7 +572,7 @@ export async function handleGet(request, reply) {
       // Plain JSON-LD file
       try {
         const jsonLd = safeJsonParse(contentStr);
-        // Use Turtle if URL ends with .ttl, otherwise use Accept header preference
+        // Use Turtle for Turtle-first URL suffixes, otherwise follow Accept preference.
         const targetType = wantsTurtle ? 'text/turtle' : selectContentType(acceptHeader, connegEnabled);
         const { content: outputContent, contentType: outputType } = await fromJsonLd(
           jsonLd,
@@ -694,7 +704,8 @@ async function negotiateHeadFileContentType({ storagePath, urlPath, stats, accep
   if (connegEnabled) {
     // Same negotiation as handleGet's file branch (#325 q-aware).
     const negotiated = selectContentType(acceptHeader, true);
-    const wantsTurtle = urlPath.endsWith('.ttl')
+    const wantsTurtleByUrl = prefersTurtleByUrl(urlPath) && !EXPLICIT_JSON_RE.test(acceptHeader);
+    const wantsTurtle = wantsTurtleByUrl
       || negotiated === RDF_TYPES.TURTLE
       || negotiated === RDF_TYPES.N3
       || negotiated === 'application/n-triples';
