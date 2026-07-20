@@ -26,7 +26,6 @@
  */
 
 import { verifyEvent, getEventHash } from '../nostr/event.js';
-import { secp256k1 } from '@noble/curves/secp256k1';
 import crypto from 'crypto';
 import { resolveDidNostrToWebId } from './did-nostr.js';
 // resolveDidNostrLocally is loaded lazily (inside the idpEnabled
@@ -35,8 +34,8 @@ import { resolveDidNostrToWebId } from './did-nostr.js';
 // importing the NIP-98 verifier.
 import { fetchCidDocument } from './cid-doc-fetch.js';
 import { normalizeControllers } from './lws-cid.js'; // shared JSON-LD controller helper
-import { decodeFFormSecp256k1, extractNostrPubkeysFromProfile } from './nostr-keys.js'; // re-exported for back-compat
-export { extractNostrPubkeysFromProfile };
+import { decodeFFormSecp256k1, extractNostrPubkeysFromProfile, nostrJwkYParities } from './nostr-keys.js';
+export { extractNostrPubkeysFromProfile }; // re-exported for back-compat
 
 // NIP-98 event kind (references RFC 7235)
 const HTTP_AUTH_KIND = 27235;
@@ -243,17 +242,41 @@ export async function verifyNostrAuth(request) {
 
   // Validate payload hash if present and request has body
   const payloadTag = getTagValue(event, 'payload');
-  if (payloadTag && request.body) {
-    let bodyString;
-    if (typeof request.body === 'string') {
-      bodyString = request.body;
+  // Validate whenever a payload tag is present AND a body was provided —
+  // keyed on `!== undefined`, not truthiness, so a JSON body that parses
+  // to a falsy value (`null`, `false`, `0`, `""`) is still hash-checked
+  // rather than silently skipping the integrity guard (Copilot review on
+  // #573). Fastify leaves request.body `undefined` when no body was sent.
+  if (payloadTag && request.body !== undefined) {
+    // Hash the EXACT bytes the client signed. NIP-98's `payload` tag is
+    // sha256(request body) over the wire bytes. crypto.update() accepts a
+    // string (encoded UTF-8) or a Buffer (raw bytes), so we pass each
+    // through in its native form — never a lossy conversion.
+    let bodyData;
+    if (typeof request.rawBody === 'string') {
+      // application/json raw wire string captured by the parser (#565),
+      // because by this point request.body is already a parsed object and
+      // the original bytes are gone. Re-serializing the object (the old
+      // fallback) only matched when the client happened to send minified
+      // JSON in Node's exact key order — pretty-printed or differently-
+      // escaped bodies 401'd despite a valid signature. (JSON is UTF-8 by
+      // spec, so the captured string round-trips losslessly.)
+      bodyData = request.rawBody;
+    } else if (typeof request.body === 'string') {
+      bodyData = request.body;
     } else if (Buffer.isBuffer(request.body)) {
-      bodyString = request.body.toString();
+      // Hash the Buffer DIRECTLY. A .toString() round-trip UTF-8-mangles
+      // binary / non-UTF-8 bodies (e.g. an image PUT) and would cause
+      // false mismatches against the raw-byte hash the client signed.
+      bodyData = request.body;
     } else {
-      bodyString = JSON.stringify(request.body);
+      // No raw bytes captured (shouldn't happen for HTTP requests:
+      // application/json sets rawBody, other types stay a Buffer). Keep a
+      // deterministic fallback rather than throwing.
+      bodyData = JSON.stringify(request.body);
     }
 
-    const expectedHash = crypto.createHash('sha256').update(bodyString).digest('hex');
+    const expectedHash = crypto.createHash('sha256').update(bodyData).digest('hex');
     if (payloadTag.toLowerCase() !== expectedHash.toLowerCase()) {
       return { webId: null, error: 'Payload hash mismatch' };
     }
@@ -635,29 +658,22 @@ function hexToBase64url(hex) {
  *
  * EC keys are (x, y) pairs — two distinct valid points share the same
  * x with opposite y parities. Matching on x alone would let an
- * attacker craft a JWK with the target x and a wrong y, which we'd
- * then accept as the user's Nostr key. So we also derive the
- * BIP-340-canonical y (even-parity) for the target x and require the
- * JWK's y to match.
+ * attacker craft a JWK with the target x and a fabricated, off-curve
+ * y, which we'd then accept as the user's Nostr key. So we also
+ * require the JWK's y to be a genuine on-curve y for the target x —
+ * accepting either parity, since the did:nostr spec allows both 0x02
+ * (even) and 0x03 (odd) encodings of the same x-only identity (see
+ * `nostrJwkYParities` / issue #571).
  *
  * Returns false if the JWK's coordinates aren't on-curve, can't be
- * decoded, or don't match the BIP-340 canonical point for `targetHex`.
+ * decoded, or don't match an on-curve point for `targetHex`.
  */
 function jwkMatchesNostrPubkey(jwk, targetHex, targetB64u) {
   if (typeof jwk.x !== 'string' || typeof jwk.y !== 'string') return false;
   if (jwk.x !== targetB64u) return false;
-  // Decompress the BIP-340 even-y point for the target x. Then compare
-  // the JWK's declared y against this canonical y.
-  let canonicalY;
-  try {
-    // Compressed SEC1 point, even-y prefix (0x02) || x.
-    const compressed = '02' + targetHex;
-    const point = secp256k1.ProjectivePoint.fromHex(compressed);
-    const affine = point.toAffine();
-    canonicalY = affine.y.toString(16).padStart(64, '0');
-  } catch {
-    return false;
-  }
+  // The two genuine on-curve y's (even + odd parity) for the target x.
+  const validY = nostrJwkYParities(targetHex);
+  if (!validY) return false;
   let jwkYHex;
   try {
     jwkYHex = Buffer.from(jwk.y.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
@@ -665,7 +681,7 @@ function jwkMatchesNostrPubkey(jwk, targetHex, targetB64u) {
   } catch {
     return false;
   }
-  return jwkYHex === canonicalY;
+  return validY.includes(jwkYHex);
 }
 
 function isInProofPurpose(profile, predicate, vmId, baseUrl) {

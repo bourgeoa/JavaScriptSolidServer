@@ -11,11 +11,12 @@
 
 import { Command } from 'commander';
 import { createServer } from '../src/server.js';
-import { loadConfig, saveConfig, printConfig, defaults } from '../src/config.js';
+import { loadConfig, saveConfig, printConfig, defaults, parsePluginFlag } from '../src/config.js';
 import { createInvite, listInvites, revokeInvite } from '../src/idp/invites.js';
 import { findByUsername, updatePassword, deleteAccount } from '../src/idp/accounts.js';
 import { setQuotaLimit, getQuotaInfo, reconcileQuota, formatBytes } from '../src/storage/quota.js';
 import { parseSize } from '../src/config.js';
+import { findFreePort, formatUrl } from '../src/utils/port.js';
 import crypto from 'crypto';
 import fs from 'fs-extra';
 import path from 'path';
@@ -112,7 +113,7 @@ program
   .option('--cors-proxy-max-bytes <n>', 'CORS proxy upstream response size cap (default 50MB)', parseInt)
   .option('--cors-proxy-timeout-ms <ms>', 'CORS proxy upstream request timeout (default 30s)', parseInt)
   .option('--cors-proxy-max-redirects <n>', 'CORS proxy max redirect hops, each re-validated (default 5)', parseInt)
-  .option('--body-limit <size>', 'Maximum request body size, e.g. 100MB or 1GB (default 10MB). Raise to accept larger `git push`; lower for tighter memory-DoS protection.')
+  .option('--body-limit <size>', 'Maximum request body size, e.g. 100MB or 1GB (default 20MB). Raise to accept larger `git push`; lower for tighter memory-DoS protection.')
   .option('--nostr', 'Enable Nostr relay')
   .option('--no-nostr', 'Disable Nostr relay')
   .option('--nostr-path <path>', 'Nostr relay WebSocket path (default: /relay)')
@@ -156,6 +157,7 @@ program
   .option('--mcp', 'Enable MCP (Model Context Protocol) server at /mcp — pod as a tool surface for agents (#490)')
   .option('--no-mcp', 'Disable MCP server')
   .option('-q, --quiet', 'Suppress log output')
+  .option('--plugin <module[@prefix]>', 'Mount an app plugin (repeatable; prefix must start with /). Appends to config-file plugins (#594)', (value, previous) => previous.concat([value]), [])
   .option('--log-level <level>', 'Log level: error, warn, info, debug (default: info)')
   .option('--print-config', 'Print configuration and exit')
   .action(async (options) => {
@@ -168,6 +170,16 @@ program
 
       const config = await loadConfig(options, options.config);
 
+      // --plugin entries APPEND to the config file's plugins rather than
+      // following the CLI-replaces-file rule — replacing would make -c plus
+      // one --plugin silently drop the file's declared apps (#594).
+      if (options.plugin?.length) {
+        config.plugins = [
+          ...(Array.isArray(config.plugins) ? config.plugins : []),
+          ...options.plugin.map(parsePluginFlag),
+        ];
+      }
+
       // Set DATA_ROOT env var so all modules use the same data directory
       process.env.DATA_ROOT = path.resolve(config.root);
 
@@ -176,10 +188,29 @@ program
         process.exit(0);
       }
 
+      // If the requested port is busy, shift up to the next free one
+      // (Vite-style), rather than dying on a raw EADDRINUSE — a common
+      // first-run papercut when a stale instance is still running (#557).
+      // Must run BEFORE the issuer/baseUrl are derived so they reflect
+      // the port we actually bind. The notice goes to stderr so it
+      // surfaces even under --quiet (a port change the operator didn't
+      // ask for is operationally significant).
+      const requestedPort = config.port;
+      const boundPort = await findFreePort(requestedPort, config.host);
+      if (boundPort === null) {
+        console.error(
+          `Error: no free port found in ${requestedPort}–${requestedPort + 9} on ${config.host}.`
+        );
+        process.exit(1);
+      }
+      if (boundPort !== requestedPort) {
+        console.error(`  Port ${requestedPort} is in use — using ${boundPort} instead.`);
+        config.port = boundPort;
+      }
+
       // Determine IdP issuer URL
       const protocol = config.ssl ? 'https' : 'http';
-      const serverHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
-      const baseUrl = `${protocol}://${serverHost}:${config.port}`;
+      const baseUrl = formatUrl(config.host, config.port, protocol);
       // Ensure issuer has trailing slash for CTH compatibility
       let idpIssuer = config.idpIssuer || baseUrl;
       if (idpIssuer && !idpIssuer.endsWith('/')) {
@@ -190,6 +221,10 @@ program
       const server = createServer({
         port: config.port,
         host: config.host,
+        // Wire the parsed --body-limit / JSS_BODY_LIMIT value through —
+        // omitting it here silently pinned every CLI-started server to
+        // the 10MB default and made the #474 knob dead wiring (#561).
+        bodyLimit: config.bodyLimit,
         logger: config.logger,
         conneg: config.conneg,
         notifications: config.notifications,
@@ -244,6 +279,11 @@ program
         mongoUrl: config.mongoUrl,
         mongoDatabase: config.mongoDatabase,
         mcp: config.mcp,
+        // Config-file-only keys (no CLI flags yet): omitting them here made
+        // the documented `-c config.json` route silently boot without the
+        // declared apps (#592).
+        appPaths: config.appPaths,
+        plugins: config.plugins,
       });
 
       await server.listen({ port: config.port, host: config.host });
