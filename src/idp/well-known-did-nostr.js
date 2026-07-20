@@ -1,4 +1,4 @@
-/**
+﻿/**
  * did:nostr HTTP resolution endpoint.
  *
  * Implements the well-known path from the did:nostr spec:
@@ -318,6 +318,10 @@ export function profilePathFromWebId(dataRoot, webId, accountId = 'unknown') {
  *      → `<dataRoot>/profile/card`
  *   3. Subdomain-mode pod   (host=`alice.example.com`, path=`/profile/card`)
  *      → `<dataRoot>/alice/profile/card`
+ *   4. Root-path WebID      (path=`/` or `/alice/`, e.g. `https://melvin.solid.social/#me`)
+ *      → additionally probes `profile/card` under the
+ *      otherwise-directory candidate(s), e.g.
+ *      `<dataRoot>/melvin/profile/card` (#451)
  *
  * The subdomain candidate (3) is gated on `podName` matching the
  * WebID host's first DNS label — without that gate, a root-pod
@@ -351,17 +355,42 @@ export function profilePathCandidates(dataRoot, webId, podName = null) {
     }
     if (!paths.includes(r)) paths.push(r);
   };
+  // Subdomain gate: the WebID host's first DNS label must match the
+  // account's podName (case-insensitive — DNS is). Computed up front
+  // because the root-path fallback below keys off it too.
   const subdomainMatch =
     typeof podName === 'string' && podName.length > 0 &&
     url.hostname.toLowerCase().startsWith(podName.toLowerCase() + '.');
+  // Pod-root WebID shape (#451): pathname `/` (→ pathnameRel '') or a
+  // trailing slash like `/alice/`.
   const isPodRoot = pathnameRel === '' || pathnameRel.endsWith('/');
 
   // Path-mode named pod OR root pod.
   consider(pathnameRel);
-  // Pod-root WebIDs (`/` or `/alice/`) need a conventional profile
-  // probe under that directory. Keep this off subdomain-match hosts to
-  // avoid cross-account root-profile bleed.
+  // Root-path / pod-root WebID (#451): a WebID like
+  // `https://melvin.solid.social/#me` (pathname `/`) or
+  // `https://example.com/alice/#me` (pathname `/alice/`) makes the
+  // candidate above resolve to a DIRECTORY (dataRoot itself, or the
+  // pod dir) — never a profile document. Probe the conventional
+  // profile location underneath it. Only `profile/card`: the
+  // rebuild loop reads candidates with JSON.parse, so the Turtle
+  // conventions (`profile/card`, `profile/card.ttl`) could never
+  // match anyway.
+  //
+  // Gated on !subdomainMatch: when the host carries the account's
+  // podName label, the profile lives under the pod dir (the
+  // subdomain fallback below) and `<dataRoot>/profile/card`
+  // is a DIFFERENT account's document — the root pod's. The rebuild
+  // loop's @id check absolutizes a relative subject (`"@id": "#me"`,
+  // a supported shape — see collectAuthenticationIds) against the
+  // PROBING account's WebID, so the root pod's profile could pass
+  // the check and bind the root pod's pubkeys to the subdomain
+  // account. Suppressing the root-level fallback here closes that
+  // cross-account window; no legitimate deployment serves a
+  // subdomain account's profile from the dataRoot root.
   if (isPodRoot && !subdomainMatch) {
+    // path.resolve skips empty segments, so pathnameRel === '' lands
+    // on `<dataRoot>/profile/card` (root pod) as intended.
     consider(pathnameRel, 'profile/card');
   }
   if (subdomainMatch) {
@@ -477,7 +506,7 @@ function buildDidDocument({ pubkey, webId }) {
   const multikey = `f` + `e701` + `02` + pubkey.toLowerCase();
   const vmId = `${did}#key1`;
   return {
-    '@context': ['https://w3id.org/did', 'https://w3id.org/nostr/context'],
+    '@context': ['https://www.w3.org/ns/cid/v1', 'https://w3id.org/nostr/context'],
     'id': did,
     'type': 'DIDNostr',
     'alsoKnownAs': [webId],

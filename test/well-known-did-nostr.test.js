@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Integration tests for the well-known did:nostr HTTP-resolution
  * endpoint (#407): JSS publishes DID docs at
  * `/.well-known/did/nostr/<pubkey>.json` for any local account whose
@@ -43,23 +43,8 @@ function fformMultikey(xOnlyHex, parity = '02') {
   return 'f' + 'e701' + parity + xOnlyHex.toLowerCase();
 }
 
-async function resolveProfilePath(rootDir, podName = null) {
-  const profileDir = podName
-    ? path.join(rootDir, podName, 'profile')
-    : path.join(rootDir, 'profile');
-  const candidates = [
-    path.join(profileDir, 'card$.jsonld'),
-    path.join(profileDir, 'card.jsonld'),
-    path.join(profileDir, 'card'),
-  ];
-  for (const candidate of candidates) {
-    if (await fs.pathExists(candidate)) return candidate;
-  }
-  return candidates[0];
-}
-
 async function patchProfileWithMultikey(podName, pubkey) {
-  const profilePath = await resolveProfilePath(TEST_DATA_DIR, podName);
+  const profilePath = path.join(TEST_DATA_DIR, podName, 'profile', 'card.jsonld');
   const profile = await fs.readJson(profilePath);
   const VM_ID = `${profile['@id'].replace('#me', '')}#nostr-key-1`;
   profile.verificationMethod = [{
@@ -144,11 +129,11 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     assert.ok(r.headers.get('last-modified'));
 
     const doc = await r.json();
-    assert.deepStrictEqual(doc['@context'], ['https://w3id.org/did', 'https://w3id.org/nostr/context']);
+    assert.deepStrictEqual(doc['@context'], ['https://www.w3.org/ns/cid/v1', 'https://w3id.org/nostr/context']);
     assert.strictEqual(doc.id, `did:nostr:${alicePk}`);
     assert.strictEqual(doc.type, 'DIDNostr');
     assert.ok(Array.isArray(doc.alsoKnownAs));
-    assert.match(doc.alsoKnownAs[0], /\/alice\/profile\/card#me$/);
+    assert.match(doc.alsoKnownAs[0], /\/alice\/profile\/card\.jsonld#me$/);
     assert.strictEqual(doc.verificationMethod[0].type, 'Multikey');
     assert.strictEqual(doc.verificationMethod[0].publicKeyMultibase, fformMultikey(alicePk));
     assert.strictEqual(doc.authentication[0], `did:nostr:${alicePk}#key1`);
@@ -280,7 +265,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     const sk = generateSecretKey();
     const rootPk = getPublicKey(sk);
     const rootWebId = `${baseUrl}/profile/card#me`;
-    const rootProfilePath = await resolveProfilePath(TEST_DATA_DIR);
+    const rootProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card.jsonld');
     const VM_ID = `${baseUrl}/profile/card#nostr-root`;
     await fs.ensureDir(path.dirname(rootProfilePath));
     await fs.writeJson(rootProfilePath, {
@@ -345,12 +330,12 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // this test runs. Without this snapshot, deleting the decoy
     // unconditionally would silently wipe legitimate state.
     const decoyPk = getPublicKey(generateSecretKey()); // unrelated key
-    const decoyProfilePath = await resolveProfilePath(TEST_DATA_DIR);
+    const decoyProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card.jsonld');
     const decoyWebId = `${baseUrl}/profile/card#decoy`;
     const sk = generateSecretKey();
     const subPk = getPublicKey(sk);
     const subWebId = 'http://sub.example.test/profile/card#me';
-    const subProfilePath = await resolveProfilePath(TEST_DATA_DIR, 'sub');
+    const subProfilePath = path.join(TEST_DATA_DIR, 'sub', 'profile', 'card.jsonld');
     const VM_ID = 'http://sub.example.test/profile/card#k';
     const accountsDir = path.join(TEST_DATA_DIR, '.idp', 'accounts');
     const indexPath = path.join(accountsDir, '_webid_index.json');
@@ -461,7 +446,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // the DID doc is published.
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const profilePath = await resolveProfilePath(TEST_DATA_DIR, 'alice');
+    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card.jsonld');
     const profile = await fs.readJson(profilePath);
     const absSubject = profile['@id'];           // e.g. http://.../alice/profile/card#me
     const absSubjectNoHash = absSubject.replace('#me', '');
@@ -513,7 +498,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
       webId: orphanWebId,
     }, { spaces: 2 });
     // Write a malformed profile so JSON.parse will throw.
-    const profilePath = await resolveProfilePath(TEST_DATA_DIR, 'orphan');
+    const profilePath = path.join(TEST_DATA_DIR, 'orphan', 'profile', 'card.jsonld');
     await fs.ensureDir(path.dirname(profilePath));
     await fs.writeFile(profilePath, '{ this is not valid json', 'utf8');
 
@@ -545,7 +530,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // Index must respect that intent.
     const otherSk = generateSecretKey();
     const otherPk = getPublicKey(otherSk);
-    const profilePath = await resolveProfilePath(TEST_DATA_DIR, 'alice');
+    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card.jsonld');
     const profile = await fs.readJson(profilePath);
     const REVOKED_VM_ID = `${profile['@id'].replace('#me', '')}#nostr-revoked`;
     profile.verificationMethod.push({
@@ -701,16 +686,16 @@ describe('profilePathFromWebId — DATA_ROOT containment', () => {
   // directly with raw inputs that bypass URL parsing's `..`
   // normalization, since that's the layer that would matter if a
   // future caller ever bypassed `new URL()`.
-  const DATA_ROOT = path.resolve('/srv/jss/data');
+  const DATA_ROOT = '/srv/jss/data';
 
   it('resolves a normal pathname under dataRoot', () => {
     const p = profilePathFromWebId(DATA_ROOT, 'http://example/alice/profile/card#me');
-    assert.strictEqual(p, path.join(DATA_ROOT, 'alice', 'profile', 'card'));
+    assert.strictEqual(p, '/srv/jss/data/alice/profile/card');
   });
 
   it('resolves a root-pod pathname under dataRoot', () => {
     const p = profilePathFromWebId(DATA_ROOT, 'http://example/profile/card#me');
-    assert.strictEqual(p, path.join(DATA_ROOT, 'profile', 'card'));
+    assert.strictEqual(p, '/srv/jss/data/profile/card');
   });
 
   it('rejects unparseable webIds', () => {
@@ -723,7 +708,7 @@ describe('profilePathFromWebId — DATA_ROOT containment', () => {
     // WHATWG URL parsing already strips this — confirm the result
     // stays inside dataRoot regardless.
     const p = profilePathFromWebId(DATA_ROOT, 'http://example/../../../etc/passwd');
-    assert.ok(p === null || p.startsWith(DATA_ROOT + path.sep) || p === DATA_ROOT,
+    assert.ok(p === null || p.startsWith('/srv/jss/data'),
       `expected containment, got ${p}`);
   });
 
@@ -784,22 +769,22 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
 
   it('path-mode named pod: <dataRoot>/<pod>/profile/card', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/alice/profile/card#me');
-    const expected = path.join(DATA_ROOT, 'alice', 'profile', 'card');
+    const expected = path.join(DATA_ROOT, 'alice', 'profile', 'card.jsonld');
     assert.ok(paths.includes(expected),
       `expected ${expected}; got ${paths.join(', ')}`);
   });
 
   it('root pod: <dataRoot>/profile/card', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/profile/card#me');
-    const expected = path.join(DATA_ROOT, 'profile', 'card');
+    const expected = path.join(DATA_ROOT, 'profile', 'card.jsonld');
     assert.ok(paths.includes(expected),
       `expected ${expected}; got ${paths.join(', ')}`);
   });
 
   it('subdomain-mode pod: emits <dataRoot>/<podName>/profile/... when host first label matches podName', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://test.solid.social/profile/card#me', 'test');
-    const pathMode = path.join(DATA_ROOT, 'profile', 'card');
-    const subdomain = path.join(DATA_ROOT, 'test', 'profile', 'card');
+    const pathMode = path.join(DATA_ROOT, 'profile', 'card.jsonld');
+    const subdomain = path.join(DATA_ROOT, 'test', 'profile', 'card.jsonld');
     assert.ok(paths.includes(pathMode),
       `expected path-mode candidate ${pathMode}; got ${paths.join(', ')}`);
     assert.ok(paths.includes(subdomain),
@@ -808,17 +793,80 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
 
   it('does NOT emit a subdomain candidate when podName is omitted', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://test.solid.social/profile/card#me');
-    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card')]);
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card.jsonld')]);
   });
 
   it('does NOT emit a subdomain candidate when podName does not match the host first label', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/profile/card#me', 'me');
-    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card')]);
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card.jsonld')]);
   });
 
   it('does NOT emit a subdomain candidate for a single-label host', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'http://localhost/profile/card#me', 'localhost');
-    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card')]);
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card.jsonld')]);
+  });
+
+  // Root-path WebIDs (#451): pathname `/` yields an empty pathnameRel,
+  // so the plain candidates resolve to directories (dataRoot itself /
+  // the pod dir) and the indexer ENOENT/not-a-regular-file'd every
+  // account shaped like `https://melvin.solid.social/#me`. The fix
+  // additionally probes the conventional `profile/card`
+  // location under each directory candidate.
+
+  it('root-path WebID probes <dataRoot>/profile/card (#451)', () => {
+    const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/#me');
+    const expected = path.join(DATA_ROOT, 'profile', 'card.jsonld');
+    assert.ok(paths.includes(expected),
+      `expected ${expected}; got ${paths.join(', ')}`);
+  });
+
+  it('root-path WebID in subdomain mode probes <dataRoot>/<podName>/profile/card (#451)', () => {
+    // The exact solid.social scenario from the issue: account `melvin`
+    // with WebID https://melvin.solid.social/#me, profile on disk at
+    // <dataRoot>/melvin/profile/card.
+    const { paths } = profilePathCandidates(DATA_ROOT, 'https://melvin.solid.social/#me', 'melvin');
+    const expected = path.join(DATA_ROOT, 'melvin', 'profile', 'card.jsonld');
+    assert.ok(paths.includes(expected),
+      `expected ${expected}; got ${paths.join(', ')}`);
+  });
+
+  it('root-path WebID in subdomain mode does NOT probe the root pod profile (#451 cross-account guard)', () => {
+    // When the subdomain gate matches, <dataRoot>/profile/card
+    // is the ROOT pod's document — a different account. A relative
+    // subject there ("@id": "#me") would absolutize against the
+    // probing account's WebID and pass the rebuild loop's @id check,
+    // binding the root pod's pubkeys to the subdomain account. The
+    // root-level fallback must therefore be suppressed when the gate
+    // matches.
+    const { paths } = profilePathCandidates(DATA_ROOT, 'https://melvin.solid.social/#me', 'melvin');
+    const rootPodProfile = path.join(DATA_ROOT, 'profile', 'card.jsonld');
+    assert.ok(!paths.includes(rootPodProfile),
+      `cross-account window: ${rootPodProfile} must not be probed for a subdomain account; got ${paths.join(', ')}`);
+  });
+
+  it('pod-root WebID with trailing slash probes <pod>/profile/card (#451)', () => {
+    // Path-mode sibling of the root-path case: pathname `/alice/`
+    // also resolves to a directory without the fallback.
+    const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/alice/#me');
+    const expected = path.join(DATA_ROOT, 'alice', 'profile', 'card.jsonld');
+    assert.ok(paths.includes(expected),
+      `expected ${expected}; got ${paths.join(', ')}`);
+  });
+
+  it('root-path WebID does NOT probe a podName dir when the host label does not match (#451)', () => {
+    // The subdomain gate must keep applying to the fallback candidate;
+    // otherwise a root-pod WebID could probe another account's pod dir.
+    const { paths } = profilePathCandidates(DATA_ROOT, 'https://melvin.solid.social/#me', 'other');
+    const leaked = path.join(DATA_ROOT, 'other', 'profile', 'card.jsonld');
+    assert.ok(!paths.includes(leaked),
+      `gate bypassed: ${leaked} should not be a candidate; got ${paths.join(', ')}`);
+  });
+
+  it('non-root WebIDs gain NO extra fallback candidates (#451)', () => {
+    // A document-shaped pathname must produce exactly the same
+    // candidate list as before the #451 fix.
+    const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/alice/profile/card#me');
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'alice', 'profile', 'card.jsonld')]);
   });
 
   it('returns empty paths for an unparseable webId', () => {

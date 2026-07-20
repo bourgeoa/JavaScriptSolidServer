@@ -1,4 +1,5 @@
-import Fastify from 'fastify';
+﻿import Fastify from 'fastify';
+import sjson from 'secure-json-parse';
 import rateLimit from '@fastify/rate-limit';
 import { readFile } from 'fs/promises';
 import { readFileSync } from 'fs';
@@ -59,6 +60,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {string} options.apNostrPubkey - Nostr pubkey for identity linking
  * @param {boolean} options.webidTls - Enable WebID-TLS client certificate auth (default false)
  * @param {boolean} options.pay - Enable HTTP 402 paid /pay/* routes (default false)
+ * @param {Array} options.plugins - App plugins to load (#206): [{ module, prefix, config, id }].
+ *   Each module's activate(api) runs at startup; prefix is WAC-exempted via appPaths.
+ *   See src/plugins.js for the api surface.
  * @param {number} options.payCost - Cost per request in satoshis (default 1)
  * @param {string} options.payMempoolUrl - Mempool API base URL (default testnet4)
  * @param {string} options.payAddress - Pod's MRC20 address for receiving token transfers
@@ -106,6 +110,24 @@ export function createServer(options = {}) {
   // Tunnel proxy is OFF by default
   const tunnelEnabled = options.tunnel ?? false;
   const tunnelPath = options.tunnelPath ?? '/.tunnel';
+  // Application mount points (plugin seam, #206): URL prefixes owned by
+  // registered apps (e.g. a game mounted at /tideholm). Requests below an
+  // app path skip the WAC hook — the app owns authentication and
+  // authorization under its prefix, like /storage/ and /db/ already do.
+  const appPaths = Array.isArray(options.appPaths)
+    ? options.appPaths
+        .filter((p) => typeof p === 'string')
+        .map((p) => p.trim().replace(/\/+$/, '')) // '/myapp/' matches like '/myapp'
+        .filter((p) => p.startsWith('/') && p.length > 1)
+    : [];
+  // App plugins (#206): loaded at startup, each entry's prefix joins
+  // appPaths. The WAC hook reads the array per request, so pushes made
+  // during plugin activation are honored.
+  const pluginEntries = Array.isArray(options.plugins) ? options.plugins : [];
+  // Parameterized reservations from api.reservePath (#602): compiled
+  // matchers for path shapes like /:user/did.json that literal appPaths
+  // prefixes cannot express. Same per-request read as appPaths.
+  const appPathPatterns = [];
   // ActivityPub federation is OFF by default
   const activitypubEnabled = options.activitypub ?? false;
   const apUsername = options.apUsername ?? 'me';
@@ -187,8 +209,8 @@ export function createServer(options = {}) {
   // already coerced by parseEnvValue) pass through unchanged; strings
   // ("100MB" from CLI / config files) go through parseSize for
   // size-shorthand support. The typeof check matters because parseSize
-  // calls `.match` on its input and would throw on a raw number. Default
-  // matches the previous hard-coded 10 MiB cap. See #474.
+  // calls `.match` on its input and would throw on a raw number. Falls
+  // back to defaults.bodyLimit (20 MiB, #563) when unset. See #474.
   const bodyLimit = options.bodyLimit == null
     ? defaults.bodyLimit
     : (typeof options.bodyLimit === 'number' ? options.bodyLimit : parseSize(options.bodyLimit));
@@ -269,7 +291,43 @@ export function createServer(options = {}) {
     done(null, body);
   });
 
+  // Override the default application/json parser so the NIP-98 payload-hash
+  // check (src/auth/nostr.js) can verify against the EXACT bytes the client
+  // signed, not a re-serialization of the parsed object (#565). The default
+  // parser discards the raw bytes once it produces an object, so capturing
+  // req.rawBody here is the only point they still exist. Behaviour otherwise
+  // mirrors Fastify 4's defaultJsonParser exactly — empty body → 400,
+  // secure-json-parse (same prototype-pollution protection JSS gets today),
+  // 400 on malformed — so no other request path changes. (Must
+  // removeContentTypeParser first: Fastify throws on a duplicate type.)
+  fastify.removeContentTypeParser('application/json');
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    req.rawBody = body;
+    if (body === '' || body == null) {
+      // Match Fastify's FST_ERR_CTP_EMPTY_JSON_BODY exactly (code +
+      // message + status), so the error-response shape — which surfaces
+      // err.code — is identical to the default parser's.
+      const err = new Error("Body cannot be empty when content-type is set to 'application/json'");
+      err.code = 'FST_ERR_CTP_EMPTY_JSON_BODY';
+      err.statusCode = 400;
+      return done(err, undefined);
+    }
+    let json;
+    try {
+      // The malformed-JSON path already mirrors Fastify's default: it
+      // sets statusCode 400 on the raw parser error without adding an FST
+      // code (the default does the same), so no code is set here.
+      json = sjson.parse(body);
+    } catch (err) {
+      err.statusCode = 400;
+      return done(err, undefined);
+    }
+    done(null, json);
+  });
+
   // Attach server config to requests
+  // Raw request body for the application/json parser to stash (#565).
+  fastify.decorateRequest('rawBody', null);
   fastify.decorateRequest('connegEnabled', null);
   fastify.decorateRequest('notificationsEnabled', null);
   fastify.decorateRequest('idpEnabled', null);
@@ -361,6 +419,29 @@ export function createServer(options = {}) {
     } catch { /* keep 'unknown' */ }
     fastify.register(idpPlugin, {
       issuer: idpIssuer, inviteOnly, singleUser, singleUserName, jssVersion,
+    });
+  }
+
+  // Load app plugins (#206). Deferred into a register scope so the dynamic
+  // imports and async activation run during fastify's startup; a failing
+  // plugin fails listen() rather than leaving a half-configured server.
+  if (pluginEntries.length) {
+    fastify.register(async (instance) => {
+      const { loadPlugins } = await import('./plugins.js');
+      await loadPlugins(instance, pluginEntries, {
+        appPaths,
+        appPathPatterns,
+        root: options.root || process.env.DATA_ROOT || './data',
+        log: fastify.log,
+        // api.serverInfo inputs (#601). ?? keeps an explicit port 0 —
+        // "resolved at listen" — instead of masking it with the default.
+        origin: {
+          ssl: !!options.ssl,
+          host: options.host,
+          port: options.port ?? defaults.port,
+          baseUrl: idpIssuer?.replace(/\/$/, '') || null,
+        },
+      });
     });
   }
 
@@ -656,15 +737,9 @@ export function createServer(options = {}) {
   fastify.addHook('preHandler', async (request, reply) => {
     // Skip auth for pod creation, OPTIONS, IdP routes, mashlib, well-known, notifications, nostr, git, and AP
     const mashlibPaths = ['/mashlib.min.js', '/mash.css', '/841.mashlib.min.js'];
-    const apPaths = ['/inbox', '/posts/', '/profile/avatar.png', '/profile/header.png', '/profile/card/inbox', '/profile/card/outbox', '/profile/card/followers', '/profile/card/following',
+    const apPaths = ['/inbox', '/profile/card/inbox', '/profile/card/outbox', '/profile/card/followers', '/profile/card/following',
       '/api/v1/apps', '/api/v1/instance', '/api/v1/accounts/verify_credentials',
-      '/api/v1/timelines/', '/api/v1/statuses', '/api/v1/accounts/', '/api/v1/notifications',
       '/oauth/authorize', '/oauth/token'];
-    const isApPublicPath = apPaths.some(p =>
-      request.url === p ||
-      request.url.startsWith(p + '?') ||
-      (p.endsWith('/') && request.url.startsWith(p))
-    );
     // Check if request wants ActivityPub content for profile
     const accept = request.headers.accept || '';
     const wantsAP = accept.includes('activity+json') || accept.includes('ld+json; profile="https://www.w3.org/ns/activitystreams"');
@@ -679,7 +754,7 @@ export function createServer(options = {}) {
         (nostrEnabled && request.url.startsWith(nostrPath)) ||
         (gitEnabled && isGitRequest(request.url)) ||
         (corsProxyEnabled && isCorsProxyRequest(request.url.split('?')[0])) ||
-        (activitypubEnabled && (request.url.startsWith('/api/v1/') || request.url.startsWith('/api/v2/') || isApPublicPath)) ||
+        (activitypubEnabled && apPaths.some(p => request.url === p || request.url.startsWith(p + '?'))) ||
         isProfileAP ||
         request.url.startsWith('/storage/') ||
         (payEnabled && isPayRequest(request.url)) ||
@@ -688,6 +763,8 @@ export function createServer(options = {}) {
         (webrtcEnabled && (request.url === webrtcPath || request.url.startsWith(webrtcPath + '?'))) ||
         (terminalEnabled && (request.url === '/.terminal' || request.url.startsWith('/.terminal?'))) ||
         (tunnelEnabled && (request.url === tunnelPath || request.url.startsWith(tunnelPath + '?') || request.url.startsWith('/tunnel/'))) ||
+        appPaths.some(p => request.url === p || request.url.startsWith(p + '/') || request.url.startsWith(p + '?')) ||
+        appPathPatterns.some(m => m.methods.has(request.method) && m.re.test(request.url)) ||
         mashlibPaths.some(p => request.url === p || request.url.startsWith(p + '.'))) {
       return;
     }
@@ -856,8 +933,11 @@ export function createServer(options = {}) {
   // Server-root landing page: seed /index.html and a public-read /.acl
   // on first start (skip-if-exists, so operator-provided files are
   // preserved). See #433 / #276. Skipped in read-only deployments so
-  // startup never mutates DATA_ROOT.
-  if (!options.readOnly) {
+  // startup never mutates DATA_ROOT, and in --public mode: WAC is
+  // bypassed there so the seeded .acl files would never be consulted,
+  // and public mode's serve-a-directory use case (servejss) must not
+  // write into the served tree.
+  if (!options.readOnly && !options.public) {
     fastify.addHook('onReady', async () => {
       // A missing or unreadable package.json (some production bundles
       // omit it) shouldn't block seeding; fall back to "unknown".
@@ -913,8 +993,8 @@ export function createServer(options = {}) {
       const podUri = isRootPod ? `${baseUrl}/` : `${baseUrl}/${singleUserName}/`;
       const displayName = isRootPod ? 'me' : singleUserName;
 
-      // Check if pod already exists. Accept either the canonical
-      // extensionless `card` or `card.jsonld` so we don't re-seed a pod
+      // Check if pod already exists. Accept either the new `card.jsonld`
+      // or legacy extensionless `card` layout so we don't re-seed a pod
       // that was created by an older JSS version. Compute the effective
       // WebID against whichever profile file actually resolves — a
       // legacy pod must keep its `/profile/card#me` WebID, otherwise the
@@ -922,8 +1002,8 @@ export function createServer(options = {}) {
       const hasJsonLd = await storage.exists(`${podPath}profile/card.jsonld`);
       const hasLegacy = await storage.exists(`${podPath}profile/card`);
       const profileFile = hasLegacy ? 'profile/card'
-              : hasJsonLd ? 'profile/card.jsonld'
-              : 'profile/card'; // fresh pod default
+                          : hasJsonLd ? 'profile/card.jsonld'
+                          : 'profile/card'; // fresh pod default
       const webId = `${podUri}${profileFile}#me`;
       const profileExists = hasJsonLd || hasLegacy;
 
@@ -1167,7 +1247,7 @@ export function createServer(options = {}) {
     // the server happened to bind on first start. The owner WebID is
     // derived from the absolute `webId` and each .acl's location by
     // `relativizeOwnerWebId`, so any current or future profile layout
-    // (canonical `profile/card#me`, jsonld `profile/card.jsonld#me`, etc.)
+    // (modern `profile/card#me`, legacy `profile/card#me`, etc.)
     // produces the correct relative IRI without hardcoding.
     const owner = aclBase => relativizeOwnerWebId(webId, podUri, aclBase);
 

@@ -1,14 +1,16 @@
-import * as storage from '../storage/filesystem.js';
+﻿import * as storage from '../storage/filesystem.js';
 import { initializeQuota, checkQuota, updateQuotaUsage } from '../storage/quota.js';
 import { getAllHeaders } from '../ldp/headers.js';
 import { isContainer, getEffectiveUrlPath, getPodName } from '../utils/url.js';
 import { generateProfile, generatePreferences, generateTypeIndex, serialize } from '../webid/profile.js';
-import { generateOwnerAcl, generatePrivateAcl, generateInboxAcl, generatePublicFolderAcl, serializeAcl, relativizeOwnerWebId } from '../wac/parser.js';
+import { generateOwnerAcl, generatePrivateAcl, generateInboxAcl, generatePublicFolderAcl, serializeAcl, relativizeOwnerWebId, AccessMode } from '../wac/parser.js';
+import { checkAccess } from '../wac/checker.js';
+import { buildResourceUrl } from '../auth/middleware.js';
 import { provisionOwnerKey, assertProvisionKeysCompatible } from '../keys/provision.js';
 import { createToken } from '../auth/token.js';
 import { canAcceptInput, toJsonLd, RDF_TYPES } from '../rdf/conneg.js';
-import { emitChange } from '../notifications/events.js';
 import { urlToStoragePath } from '../utils/dollar-escape.js';
+import { emitChange } from '../notifications/events.js';
 
 /**
  * Get the storage path and resource URL for a request
@@ -88,6 +90,43 @@ export async function handlePost(request, reply) {
   const newUrlPath = urlPath + filename + (isCreatingContainer ? '/' : '');
   const newStoragePath = storagePath + filename + (isCreatingContainer ? '/' : '');
   const resourceUrl = `${request.protocol}://${request.hostname}${newUrlPath}`;
+
+  // Security: a Slug that resolves to an `.acl` sidecar governs ANOTHER
+  // resource's permissions — the WAC checker searches for `*.acl`, so an
+  // `.acl` written here becomes the authorization policy for its sibling.
+  // The authorize() preHandler only checked Append/Write on the *container*
+  // (the request path), and its dedicated `.acl` Control guard
+  // (authorizeAclAccess) never fires here because the request path is the
+  // container, not the resolved sidecar. Without this an agent with mere
+  // Append rights on a container could POST `Slug: victim.acl` and self-grant
+  // Control on a sibling resource — privilege escalation. `.meta` is not
+  // consulted for WAC, but it is a protected Solid sidecar dotfile, so we gate
+  // it the same way (defense in depth) rather than let it be minted by Append.
+  // Mirror authorizeAclAccess: require acl:Control on the protected resource
+  // before minting a sidecar via POST. Build the resource URL with the same
+  // buildResourceUrl() the auth middleware uses so this Control decision is
+  // evaluated against the identical origin (host+port, subdomain-normalized).
+  // noDebit: this is a secondary WAC check on a request the authorize() hook
+  // already evaluated (and possibly billed) — pass noDebit so a payment-gated
+  // Control grant can't be charged here (no double debit, no silent charge).
+  if (!isCreatingContainer && /\.(acl|meta)$/.test(filename)) {
+    const protectedUrlPath = newUrlPath.replace(/\.(acl|meta)$/, '');
+    const protectedStoragePath = newStoragePath.replace(/\.(acl|meta)$/, '');
+    const { allowed } = await checkAccess({
+      resourceUrl: buildResourceUrl(request, protectedUrlPath),
+      resourcePath: protectedStoragePath,
+      isContainer: protectedUrlPath.endsWith('/'),
+      agentWebId: request.webId,
+      requiredMode: AccessMode.CONTROL,
+      noDebit: true
+    });
+    if (!allowed) {
+      return reply.code(403).send({
+        error: 'Forbidden',
+        message: 'Creating an ACL/meta sidecar via POST requires Control on the protected resource'
+      });
+    }
+  }
 
   let success;
   if (isCreatingContainer) {
@@ -224,7 +263,7 @@ export async function createPodStructure(name, webId, podUri, issuer, defaultQuo
   // The owner WebID is also written relatively (#430), derived from the
   // absolute `webId` and the .acl's location within the pod by
   // `relativizeOwnerWebId`. This works for any profile layout (modern
-  // `profile/card#me`, legacy `profile/card.jsonld#me`, custom shapes) and
+  // `profile/card#me`, legacy `profile/card#me`, custom shapes) and
   // falls back to the absolute WebID for foreign owners. Together this
   // keeps the on-disk pod portable across hostnames.
   const owner = aclBase => relativizeOwnerWebId(webId, podUri, aclBase);
@@ -383,8 +422,7 @@ export async function handleCreatePod(request, reply) {
 
   let baseUri, podUri, webId;
   if (subdomainsEnabled && baseDomain) {
-    // Subdomain mode: alice.example.com:port/profile/card#me
-    // baseDomain may include port (e.g. "example.com:3100")
+    // Subdomain mode: alice.example.com/profile/card#me
     const podHost = `${name}.${baseDomain}`;
     baseUri = `${request.protocol}://${baseDomain}`;
     podUri = `${request.protocol}://${podHost}/`;
