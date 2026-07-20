@@ -20,6 +20,7 @@ import {
   profilePathCandidates,
 } from '../src/idp/well-known-did-nostr.js';
 import { extractNostrPubkeysFromProfile } from '../src/auth/nostr.js';
+import { resolveDollarPath } from '../src/utils/dollar-escape.js';
 
 const TEST_HOST = '127.0.0.1';
 // Dedicated per-suite directory so we don't clobber a developer's
@@ -44,7 +45,10 @@ function fformMultikey(xOnlyHex, parity = '02') {
 }
 
 async function patchProfileWithMultikey(podName, pubkey) {
-  const profilePath = path.join(TEST_DATA_DIR, podName, 'profile', 'card.jsonld');
+  const basePath = path.join(TEST_DATA_DIR, podName, 'profile', 'card');
+  const profilePath = await resolveDollarPath(basePath, async (p) => {
+    try { return await fs.stat(p); } catch { return null; }
+  });
   const profile = await fs.readJson(profilePath);
   const VM_ID = `${profile['@id'].replace('#me', '')}#nostr-key-1`;
   profile.verificationMethod = [{
@@ -133,7 +137,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     assert.strictEqual(doc.id, `did:nostr:${alicePk}`);
     assert.strictEqual(doc.type, 'DIDNostr');
     assert.ok(Array.isArray(doc.alsoKnownAs));
-    assert.match(doc.alsoKnownAs[0], /\/alice\/profile\/card\.jsonld#me$/);
+    assert.match(doc.alsoKnownAs[0], /\/alice\/profile\/card#me$/);
     assert.strictEqual(doc.verificationMethod[0].type, 'Multikey');
     assert.strictEqual(doc.verificationMethod[0].publicKeyMultibase, fformMultikey(alicePk));
     assert.strictEqual(doc.authentication[0], `did:nostr:${alicePk}#key1`);
@@ -265,7 +269,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     const sk = generateSecretKey();
     const rootPk = getPublicKey(sk);
     const rootWebId = `${baseUrl}/profile/card#me`;
-    const rootProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card.jsonld');
+    const rootProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card');
     const VM_ID = `${baseUrl}/profile/card#nostr-root`;
     await fs.ensureDir(path.dirname(rootProfilePath));
     await fs.writeJson(rootProfilePath, {
@@ -330,12 +334,12 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // this test runs. Without this snapshot, deleting the decoy
     // unconditionally would silently wipe legitimate state.
     const decoyPk = getPublicKey(generateSecretKey()); // unrelated key
-    const decoyProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card.jsonld');
+    const decoyProfilePath = path.join(TEST_DATA_DIR, 'profile', 'card');
     const decoyWebId = `${baseUrl}/profile/card#decoy`;
     const sk = generateSecretKey();
     const subPk = getPublicKey(sk);
     const subWebId = 'http://sub.example.test/profile/card#me';
-    const subProfilePath = path.join(TEST_DATA_DIR, 'sub', 'profile', 'card.jsonld');
+    const subProfilePath = path.join(TEST_DATA_DIR, 'sub', 'profile', 'card');
     const VM_ID = 'http://sub.example.test/profile/card#k';
     const accountsDir = path.join(TEST_DATA_DIR, '.idp', 'accounts');
     const indexPath = path.join(accountsDir, '_webid_index.json');
@@ -446,7 +450,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // the DID doc is published.
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card.jsonld');
+    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card');
     const profile = await fs.readJson(profilePath);
     const absSubject = profile['@id'];           // e.g. http://.../alice/profile/card#me
     const absSubjectNoHash = absSubject.replace('#me', '');
@@ -498,7 +502,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
       webId: orphanWebId,
     }, { spaces: 2 });
     // Write a malformed profile so JSON.parse will throw.
-    const profilePath = path.join(TEST_DATA_DIR, 'orphan', 'profile', 'card.jsonld');
+    const profilePath = path.join(TEST_DATA_DIR, 'orphan', 'profile', 'card');
     await fs.ensureDir(path.dirname(profilePath));
     await fs.writeFile(profilePath, '{ this is not valid json', 'utf8');
 
@@ -530,7 +534,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // Index must respect that intent.
     const otherSk = generateSecretKey();
     const otherPk = getPublicKey(otherSk);
-    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card.jsonld');
+    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card');
     const profile = await fs.readJson(profilePath);
     const REVOKED_VM_ID = `${profile['@id'].replace('#me', '')}#nostr-revoked`;
     profile.verificationMethod.push({
@@ -769,22 +773,22 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
 
   it('path-mode named pod: <dataRoot>/<pod>/profile/card', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/alice/profile/card#me');
-    const expected = path.join(DATA_ROOT, 'alice', 'profile', 'card.jsonld');
+    const expected = path.join(DATA_ROOT, 'alice', 'profile', 'card');
     assert.ok(paths.includes(expected),
       `expected ${expected}; got ${paths.join(', ')}`);
   });
 
   it('root pod: <dataRoot>/profile/card', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/profile/card#me');
-    const expected = path.join(DATA_ROOT, 'profile', 'card.jsonld');
+    const expected = path.join(DATA_ROOT, 'profile', 'card');
     assert.ok(paths.includes(expected),
       `expected ${expected}; got ${paths.join(', ')}`);
   });
 
   it('subdomain-mode pod: emits <dataRoot>/<podName>/profile/... when host first label matches podName', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://test.solid.social/profile/card#me', 'test');
-    const pathMode = path.join(DATA_ROOT, 'profile', 'card.jsonld');
-    const subdomain = path.join(DATA_ROOT, 'test', 'profile', 'card.jsonld');
+    const pathMode = path.join(DATA_ROOT, 'profile', 'card');
+    const subdomain = path.join(DATA_ROOT, 'test', 'profile', 'card');
     assert.ok(paths.includes(pathMode),
       `expected path-mode candidate ${pathMode}; got ${paths.join(', ')}`);
     assert.ok(paths.includes(subdomain),
@@ -793,17 +797,17 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
 
   it('does NOT emit a subdomain candidate when podName is omitted', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://test.solid.social/profile/card#me');
-    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card.jsonld')]);
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card')]);
   });
 
   it('does NOT emit a subdomain candidate when podName does not match the host first label', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/profile/card#me', 'me');
-    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card.jsonld')]);
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card')]);
   });
 
   it('does NOT emit a subdomain candidate for a single-label host', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'http://localhost/profile/card#me', 'localhost');
-    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card.jsonld')]);
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'profile', 'card')]);
   });
 
   // Root-path WebIDs (#451): pathname `/` yields an empty pathnameRel,
@@ -815,7 +819,7 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
 
   it('root-path WebID probes <dataRoot>/profile/card (#451)', () => {
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/#me');
-    const expected = path.join(DATA_ROOT, 'profile', 'card.jsonld');
+    const expected = path.join(DATA_ROOT, 'profile', 'card');
     assert.ok(paths.includes(expected),
       `expected ${expected}; got ${paths.join(', ')}`);
   });
@@ -825,7 +829,7 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
     // with WebID https://melvin.solid.social/#me, profile on disk at
     // <dataRoot>/melvin/profile/card.
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://melvin.solid.social/#me', 'melvin');
-    const expected = path.join(DATA_ROOT, 'melvin', 'profile', 'card.jsonld');
+    const expected = path.join(DATA_ROOT, 'melvin', 'profile', 'card');
     assert.ok(paths.includes(expected),
       `expected ${expected}; got ${paths.join(', ')}`);
   });
@@ -839,7 +843,7 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
     // root-level fallback must therefore be suppressed when the gate
     // matches.
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://melvin.solid.social/#me', 'melvin');
-    const rootPodProfile = path.join(DATA_ROOT, 'profile', 'card.jsonld');
+    const rootPodProfile = path.join(DATA_ROOT, 'profile', 'card');
     assert.ok(!paths.includes(rootPodProfile),
       `cross-account window: ${rootPodProfile} must not be probed for a subdomain account; got ${paths.join(', ')}`);
   });
@@ -848,7 +852,7 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
     // Path-mode sibling of the root-path case: pathname `/alice/`
     // also resolves to a directory without the fallback.
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/alice/#me');
-    const expected = path.join(DATA_ROOT, 'alice', 'profile', 'card.jsonld');
+    const expected = path.join(DATA_ROOT, 'alice', 'profile', 'card');
     assert.ok(paths.includes(expected),
       `expected ${expected}; got ${paths.join(', ')}`);
   });
@@ -857,7 +861,7 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
     // The subdomain gate must keep applying to the fallback candidate;
     // otherwise a root-pod WebID could probe another account's pod dir.
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://melvin.solid.social/#me', 'other');
-    const leaked = path.join(DATA_ROOT, 'other', 'profile', 'card.jsonld');
+    const leaked = path.join(DATA_ROOT, 'other', 'profile', 'card');
     assert.ok(!paths.includes(leaked),
       `gate bypassed: ${leaked} should not be a candidate; got ${paths.join(', ')}`);
   });
@@ -866,7 +870,7 @@ describe('profilePathCandidates — deployment-shape coverage (#411)', () => {
     // A document-shaped pathname must produce exactly the same
     // candidate list as before the #451 fix.
     const { paths } = profilePathCandidates(DATA_ROOT, 'https://example.com/alice/profile/card#me');
-    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'alice', 'profile', 'card.jsonld')]);
+    assert.deepStrictEqual(paths, [path.join(DATA_ROOT, 'alice', 'profile', 'card')]);
   });
 
   it('returns empty paths for an unparseable webId', () => {

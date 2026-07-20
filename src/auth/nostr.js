@@ -413,15 +413,15 @@ async function tryResolveViaCidVerificationMethod(request, pubkeyHex) {
  *
  *   - **Single-user mode** — `request.singleUser` is true. The pod
  *     either lives at the host root (WebID
- *     `https://host/profile/card.jsonld#me`) or, when
- *     `request.singleUserName` is set, at `/<name>/profile/card.jsonld#me`.
+ *     `https://host/profile/card#me`) or, when
+ *     `request.singleUserName` is set, at `/<name>/profile/card#me`.
  *   - **Subdomain mode** — `subdomainsEnabled` is true, request hits a
  *     subdomain like `alice.example.com`. WebID is at the subdomain
- *     root: `https://alice.example.com/profile/card.jsonld#me`.
+ *     root: `https://alice.example.com/profile/card#me`.
  *   - **Path mode** — the JSS default (`subdomainsEnabled` off). Pod
  *     is at the first URL path segment:
  *     `https://example.com/alice/foo` → WebID
- *     `https://example.com/alice/profile/card.jsonld#me`.
+ *     `https://example.com/alice/profile/card#me`.
  *   - **Path-mode-on-base** — subdomains are enabled but the request
  *     hits the base domain with a path. The internal canonical form
  *     rewrites this to the subdomain shape (per buildResourceUrl).
@@ -497,13 +497,13 @@ function getPodOwnerWebId(request) {
   if (request.singleUser) {
     const name = request.singleUserName;
     return name
-      ? `${proto}://${hostNoPort}/${name}/profile/card.jsonld#me`
-      : `${proto}://${hostNoPort}/profile/card.jsonld#me`;
+      ? `${proto}://${hostNoPort}/${name}/profile/card#me`
+      : `${proto}://${hostNoPort}/profile/card#me`;
   }
 
   // Subdomain mode (request already on a pod's subdomain).
   if (request.subdomainsEnabled && request.podName && request.baseDomain) {
-    return `${proto}://${request.podName}.${request.baseDomain}/profile/card.jsonld#me`;
+    return `${proto}://${request.podName}.${request.baseDomain}/profile/card#me`;
   }
 
   // Subdomain-enabled deployment, request landed on the base domain
@@ -512,7 +512,7 @@ function getPodOwnerWebId(request) {
   if (request.subdomainsEnabled && request.baseDomain && hostNoPort === request.baseDomain) {
     const m = (request.url || '').match(/^\/([^/?#]+)/);
     if (m && !m[1].startsWith('.') && !m[1].includes('.')) {
-      return `${proto}://${m[1]}.${request.baseDomain}/profile/card.jsonld#me`;
+      return `${proto}://${m[1]}.${request.baseDomain}/profile/card#me`;
     }
     return null;
   }
@@ -523,7 +523,7 @@ function getPodOwnerWebId(request) {
   // equals the @id JSS itself wrote at pod-creation time.
   const m = (request.url || '').match(/^\/([^/?#]+)/);
   if (m && !m[1].startsWith('.') && !m[1].includes('.')) {
-    return `${proto}://${hostNoPort}/${m[1]}/profile/card.jsonld#me`;
+    return `${proto}://${hostNoPort}/${m[1]}/profile/card#me`;
   }
   return null;
 }
@@ -569,7 +569,7 @@ function firstHeaderValue(v) {
  * authentication, subject mismatch, controller mismatch, bad input).
  *
  * @param {string} webId - canonical fragment-bearing WebID URI (e.g.
- *   `https://alice.example.com/profile/card.jsonld#me`). The profile's
+ *   `https://alice.example.com/profile/card#me`). The profile's
  *   own `@id` must match this exactly after absolutization.
  * @param {string} pubkeyHex - 32-byte x-only Nostr pubkey hex
  * @returns {Promise<boolean>}
