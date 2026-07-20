@@ -745,9 +745,13 @@ export function createServer(options = {}) {
     const accept = request.headers.accept || '';
     const wantsAP = accept.includes('activity+json') || accept.includes('ld+json; profile="https://www.w3.org/ns/activitystreams"');
     const isProfileAP = activitypubEnabled && wantsAP && (request.url === '/profile/card' || request.url.startsWith('/profile/card?'));
-    const isApPublicPath = apPaths.some(p =>
-      request.url === p || request.url.startsWith(p + '/') || request.url.startsWith(p + '?')
-    );
+    const isApPublicPath = apPaths.some(p => {
+      if (request.url === p) return true;
+      if (request.url.startsWith(p + '?')) return true;
+      // Prefix match: /posts/123 matches /posts/; /api/v1/statuses matches /api/v1/
+      if (p.endsWith('/')) return request.url.startsWith(p);
+      return request.url.startsWith(p + '/');
+    });
     if (request.url === '/.pods' ||
         request.url === '/.notifications' ||
         request.method === 'OPTIONS' ||

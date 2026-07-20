@@ -61,6 +61,24 @@ async function patchProfileWithMultikey(podName, pubkey) {
   await fs.writeJson(profilePath, profile, { spaces: 2 });
 }
 
+/** Read a pod's profile, resolving $ path conventions. */
+async function readProfile(podName) {
+  const basePath = path.join(TEST_DATA_DIR, podName, 'profile', 'card');
+  const resolved = await resolveDollarPath(basePath, async (p) => {
+    try { return await fs.stat(p); } catch { return null; }
+  });
+  return fs.readJson(resolved);
+}
+
+/** Write a pod's profile, resolving $ path conventions. */
+async function writeProfile(podName, profile) {
+  const basePath = path.join(TEST_DATA_DIR, podName, 'profile', 'card');
+  const resolved = await resolveDollarPath(basePath, async (p) => {
+    try { return await fs.stat(p); } catch { return null; }
+  });
+  return fs.writeJson(resolved, profile, { spaces: 2 });
+}
+
 describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
   let server;
   let baseUrl;
@@ -450,8 +468,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // the DID doc is published.
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card');
-    const profile = await fs.readJson(profilePath);
+    const profile = await readProfile('alice');
     const absSubject = profile['@id'];           // e.g. http://.../alice/profile/card#me
     const absSubjectNoHash = absSubject.replace('#me', '');
     profile['@id'] = '#me';                       // relative subject
@@ -462,7 +479,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
       publicKeyMultibase: fformMultikey(pk),
     }];
     profile.authentication = ['#nostr-rel'];      // relative auth ref
-    await fs.writeJson(profilePath, profile, { spaces: 2 });
+    await writeProfile('alice', profile);
 
     const r = await fetch(`${baseUrl}/.well-known/did/nostr/${pk}.json`);
     assert.strictEqual(r.status, 200);
@@ -479,7 +496,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
       publicKeyMultibase: fformMultikey(alicePk),
     }];
     profile.authentication = [`${absSubjectNoHash}#nostr-key-1`];
-    await fs.writeJson(profilePath, profile, { spaces: 2 });
+    await writeProfile('alice', profile);
   });
 
   it('logs a diagnostic when an account profile is unreadable (not silent)', async () => {
@@ -534,8 +551,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
     // Index must respect that intent.
     const otherSk = generateSecretKey();
     const otherPk = getPublicKey(otherSk);
-    const profilePath = path.join(TEST_DATA_DIR, 'alice', 'profile', 'card');
-    const profile = await fs.readJson(profilePath);
+    const profile = await readProfile('alice');
     const REVOKED_VM_ID = `${profile['@id'].replace('#me', '')}#nostr-revoked`;
     profile.verificationMethod.push({
       id: REVOKED_VM_ID,
@@ -544,7 +560,7 @@ describe('GET /.well-known/did/nostr/:pubkey (#407)', () => {
       publicKeyMultibase: fformMultikey(otherPk),
     });
     // NOTE: NOT added to profile.authentication
-    await fs.writeJson(profilePath, profile, { spaces: 2 });
+    await writeProfile('alice', profile);
 
     const r = await fetch(`${baseUrl}/.well-known/did/nostr/${otherPk}.json`);
     assert.strictEqual(r.status, 404);
