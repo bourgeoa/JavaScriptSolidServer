@@ -1,6 +1,6 @@
-# PATCH.md — bourgeoa/patched-v0.0.204
+# PATCH.md — bourgeoa/dollar-escape-v0.0.219
 
-Patches applied on top of [origin/gh-pages v0.0.284](https://github.com/JavaScriptSolidServer/JavaScriptSolidServer).
+Patches applied on top of [origin/gh-pages](https://github.com/JavaScriptSolidServer/JavaScriptSolidServer).
 
 ---
 
@@ -126,23 +126,80 @@ No bourgeoa-specific changes in this area.
 
 ---
 
-## Test summary
+## 8. Canonical WebID: `profile/card` (extensionless)
+
+**Files:** `src/auth/nostr.js`, `src/handlers/container.js`, `src/idp/well-known-did-nostr.js`, `src/server.js`, `bin/jss.js`
+
+The canonical WebID profile path is **`profile/card`** (no `.jsonld` extension).
+This applies everywhere — pod creation, WebID construction, DID resolution,
+CID verification method lookup, single-user pod seeding, and ActivityPub
+actor routes.
+
+A fallback chain in `src/server.js` detects existing pods created by older
+JSS versions and preserves their WebID shape:
 
 ```
-963 tests | 961 pass | 1 fail (WSL1 POSIX 0o600) | 1 skip
+hasJsonLd (profile/card.jsonld) → use profile/card.jsonld#me
+hasLegacy (profile/card)        → use profile/card#me
+fresh pod                       → use profile/card#me (canonical)
 ```
 
-The single failure is `keys-provision-integration.test.js` — expects `0o600`
-file permissions on a secret key, but WSL1 on DrvFs returns `0o777`. This is
-a WSL1/Windows filesystem limitation, not a code bug.
+This is paired with the `$`-escape filesystem layer (section 9) which handles
+the actual on-disk filename (`card$.jsonld`) transparently.
 
 ---
 
-## New test files
+## 9. Dollar-escape: `$` URL-to-filesystem mapping
 
-| File | Lines |
-|------|-------|
-| `test/remotestorage.test.js` | 258 |
-| `test/mastodon-api.test.js` | 482 |
-| `test/adapter.test.js` | 57 |
-| `test/subdomain-base-files.test.js` | 53 |
+**Files:** `src/utils/dollar-escape.js` (new), `src/handlers/resource.js`, `src/handlers/container.js`, `src/idp/well-known-did-nostr.js`
+
+Implements the Solid `$` convention for storing extensionless RDF resources
+with a file extension on disk:
+
+| URL | Disk |
+|-----|------|
+| `/profile/card` | `/profile/card$.jsonld` |
+| `/alice/data` (Turtle) | `/alice/data$.ttl` |
+
+**Exports:**
+
+- **`urlToStoragePath(urlPath, contentType)`** — URL → disk on write.
+  `/profile/card` + `application/ld+json` → `/profile/card$.jsonld`.
+  Non-RDF content types and paths that already have an extension pass through
+  unchanged. Dot-files (`.acl`, `.meta`) are never dollar-escaped.
+
+- **`resolveDollarPath(urlPath, statFn)`** — URL → disk on read.
+  Tries `$ext` variants first (`card$.jsonld`, `card$.ttl`, …), then plain
+  extension fallback for older pods (`card.jsonld`), then returns the original
+  path. Used by GET/HEAD/DELETE/PATCH handlers when `stat()` returns null on
+  the plain URL path.
+
+- **`fileNameToUrlName(filename)`** — Disk → URL for container listings.
+  `card$.jsonld` → `card`.
+
+Dot-files (`.acl`, `.meta`) are stored as-is, never `$`-escaped. Non-RDF files
+(e.g. `index.html`, `avatar.png`) also pass through unchanged.
+
+---
+
+## Test summary
+
+```
+1125 tests | 1121 pass | 3 fail (WSL1) | 1 skip | 0 cancelled
+```
+
+All 3 failures are WSL1 environment limitations, not code bugs:
+- `test/port.test.js` (2): Windows SO_REUSEADDR prevents exclusive port binding — `findFreePort` cannot detect busy ports
+- `test/port-shift-cli.test.js` (1): CLI child process hangs after TOKEN_SECRET warning on drvfs
+
+These pass on native Linux (WSL2 / GitHub Actions CI).
+
+---
+
+## New test files (not in gh-pages)
+
+| File | Lines | Added by |
+|------|-------|----------|
+| `test/remotestorage.test.js` | 258 | Section 4 |
+| `test/mastodon-api.test.js` | 482 | Section 3 |
+| `test/adapter.test.js` | 85 | Subdomain base-domain root files (#307) |
