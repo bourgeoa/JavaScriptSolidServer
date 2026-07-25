@@ -104,6 +104,7 @@ program
   .option('--base-domain <domain>', 'Base domain for subdomain pods (e.g., "example.com")')
   .option('--mashlib-cdn', 'Enable Mashlib data browser (CDN mode)')
   .option('--mashlib-module <url>', 'Enable ES module data browser from a URL')
+  .option('--mashlib', 'Enable Mashlib data browser (local mode, serves from src/mashlib-local/dist/)')
   .option('--no-mashlib', 'Disable Mashlib data browser')
   .option('--mashlib-version <version>', 'Mashlib version for CDN mode (default: 2.0.0)')
   .option('--git', 'Enable Git HTTP backend (clone/push support)')

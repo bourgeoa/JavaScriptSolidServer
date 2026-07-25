@@ -347,7 +347,7 @@ export async function handleGet(request, reply) {
         : generateDatabrowserHtml(
           resourceUrl,
           request.mashlibCdn ? request.mashlibVersion : null,
-          { embedJsonLd }
+          { embedJsonLd, ...(request.mashlibLocal && { localBase: '/' }) }
         );
       const headers = getAllHeaders({
         isContainer: true,
@@ -485,7 +485,7 @@ export async function handleGet(request, reply) {
       : generateDatabrowserHtml(
         resourceUrl,
         request.mashlibCdn ? request.mashlibVersion : null,
-        { embedJsonLd }
+        { embedJsonLd, ...(request.mashlibLocal && { localBase: '/' }) }
       );
     const headers = getAllHeaders({
       isContainer: false,

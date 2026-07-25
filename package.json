@@ -62,6 +62,8 @@
   ],
   "license": "AGPL-3.0-only",
   "optionalDependencies": {
+    "@fastify/static": "^7.0.4",
+    "mashlib": "^2.2.2",
     "mongodb": "^6.21.0"
   },
   "devDependencies": {

@@ -80,9 +80,11 @@ export function createServer(options = {}) {
   const baseDomain = options.baseDomain || null;
   // Mashlib data browser is OFF by default
   // mashlibCdn: load from CDN; mashlibModule: URL to ES module entry point
+  // mashlib: local mode — serves from node_modules/mashlib/dist/
   const mashlibModule = options.mashlibModule ?? false;
   const mashlibCdn = options.mashlibCdn ?? false;
-  const mashlibEnabled = mashlibCdn || !!mashlibModule;
+  const mashlibLocal = options.mashlib ?? false;
+  const mashlibEnabled = mashlibCdn || !!mashlibModule || mashlibLocal;
   const mashlibVersion = options.mashlibVersion ?? '2.0.0';
   // Git HTTP backend is OFF by default - enables clone/push via git protocol
   const gitEnabled = options.git ?? false;
@@ -338,6 +340,7 @@ export function createServer(options = {}) {
   fastify.decorateRequest('mashlibCdn', null);
   fastify.decorateRequest('mashlibVersion', null);
   fastify.decorateRequest('mashlibModule', null);
+  fastify.decorateRequest('mashlibLocal', null);
   fastify.decorateRequest('defaultQuota', null);
   fastify.decorateRequest('provisionKeys', null);
   fastify.decorateRequest('config', null);
@@ -354,6 +357,7 @@ export function createServer(options = {}) {
     request.mashlibCdn = mashlibCdn;
     request.mashlibVersion = mashlibVersion;
     request.mashlibModule = mashlibModule;
+    request.mashlibLocal = mashlibLocal;
     request.defaultQuota = defaultQuota;
     request.provisionKeys = provisionKeysEnabled;
     request.config = { public: options.public, readOnly: options.readOnly };
@@ -834,6 +838,33 @@ export function createServer(options = {}) {
       if (chunkPattern.test(request.url)) {
         const filename = request.url.split('/').pop();
         return reply.redirect(302, `${cdnBase}/${filename}`);
+      }
+    });
+  }
+
+  // Mashlib local mode: serve static files from node_modules/mashlib/dist/.
+  // Uses an onRequest hook (not a route) to avoid wildcard /* route conflicts.
+  if (mashlibEnabled && mashlibLocal) {
+    const mashlibDist = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'mashlib', 'dist');
+
+    fastify.addHook('onRequest', async (request, reply) => {
+      const urlPath = request.url.split('?')[0];
+      const filename = urlPath.replace(/^\//, '');
+      // Reject paths with subdirectories or dotfile shenanigans
+      if (!filename || filename.includes('/') || filename.startsWith('.')) return;
+      try {
+        const filePath = join(mashlibDist, filename);
+        const content = await readFile(filePath);
+        const ext = filename.split('.').pop();
+        const mime = {
+          js: 'application/javascript', map: 'application/json',
+          css: 'text/css', html: 'text/html', png: 'image/png',
+          svg: 'image/svg+xml', ico: 'image/x-icon',
+        }[ext] || 'application/octet-stream';
+        return reply.type(mime).send(content);
+      } catch {
+        // File not found — return undefined so Fastify continues
+        return;
       }
     });
   }

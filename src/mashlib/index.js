@@ -265,15 +265,14 @@ export function roundTripOptimizationScript() {
 export function generateDatabrowserHtml(resourceUrl, cdnVersion = null, opts = {}) {
   const island = dataIsland(resourceUrl, opts.embedJsonLd);
   const reader = opts.roundTripOptimization === false ? '' : roundTripOptimizationScript();
-  if (cdnVersion) {
-    // CDN mode: load the matching mashlib databrowser shell template from CDN,
-    // then load CSS/JS from the same version while staying on this origin.
-    const cdnBase = `https://unpkg.com/mashlib@${cdnVersion}/dist`;
+  // Local mode: same shell-template + CSS + JS loading as CDN, but from / instead of unpkg.
+  if (cdnVersion || opts.localBase) {
+    const base = cdnVersion ? `https://unpkg.com/mashlib@${cdnVersion}/dist` : opts.localBase.replace(/\/+$/, '');
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>SolidOS Web App</title>${island}${reader}</head>
 <body id="PageBody"><p>Loading Mashlib…</p>
 <script>
 (function() {
-  var cdnBase = '${cdnBase}';
+  var base = '${base}';
 
   (function cleanupRefreshParam() {
     try {
@@ -392,15 +391,15 @@ export function generateDatabrowserHtml(resourceUrl, cdnVersion = null, opts = {
   }
 
   var shellCandidates = [
-    cdnBase + '/databrowser.html'
+    base + '/databrowser.html'
   ];
 
   fetchFirst(shellCandidates)
     .then(function(shellHtml) {
       applyShellFromTemplate(shellHtml);
-      ensureStylesheet(cdnBase + '/mash.css');
+      ensureStylesheet(base + '/mash.css');
       loadScript(
-        cdnBase + '/mashlib.min.js',
+        base + '/mashlib.min.js',
         function() {
           installAuthReloadFallback();
           if (window.panes && typeof window.panes.runDataBrowser === 'function') {
