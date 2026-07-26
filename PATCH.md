@@ -86,12 +86,60 @@ and `/api/v1/` prefix matching.
 
 ## 5. Mashlib merge + fixes
 
-**Files:** `src/mashlib/index.js`, `src/handlers/resource.js`
+**Files:** `src/mashlib/index.js`, `src/handlers/resource.js`, `src/server.js`,
+`src/auth/middleware.js`, `package.json`
 
 - Merged origin's `viewableTypes` array (markdown, playlists, `audio/*`)
   with the correct `{serve, reason}` return format in `getMashlibDecision`.
 - Adopted origin's `getMashlibEtag` refactoring for mashlib-aware ETags.
 - Fixed missing `shouldServeMashlib` import causing 500 on all requests.
+
+### Mashlib-local: serve from `node_modules/mashlib/dist/`
+
+Local mode (`--mashlib`) no longer requires a separate `src/mashlib-local/`
+build directory. Instead, mashlib is installed as a `file:` dependency in
+`package.json` pointing to the local `solidos/workspaces/mashlib` workspace:
+
+```json
+"mashlib": "file:../../solidos/workspaces/mashlib"
+```
+
+Static files (`mashlib.min.js`, `mash.css`, `databrowser.html`, etc.) are
+served from `node_modules/mashlib/dist/` via an `onRequest` hook in
+`src/server.js`. This runs before any route handler and serves only
+root-level files (no subdirectory traversal).
+
+### databrowser.html shell template
+
+When `mashlibLocal` is true, `generateDatabrowserHtml()` receives
+`{ localBase: '/' }` and takes the CDN/localBase code path. This path:
+
+1. Fetches `/databrowser.html` from the local server
+2. Applies it as the body shell via `applyShellFromTemplate()` (which also
+   transfers `data-app-shell="databrowser"` and other body attributes)
+3. Loads `/mashlib.min.js` and calls `panes.runDataBrowser()`
+
+This replaces the older fallback template (hardcoded `PageHeader`/`DummyUUID`
+structure) with the modern `solid-ui-provider` → `app-shell` → `MainContent`
+structure from mashlib's dist.
+
+**Note:** `bin/jss.js` CLI help and `docs/` still reference the old
+`src/mashlib-local/dist/` path — these need a follow-up doc update.
+
+### Cross-format PUT fix (dollar-escape)
+
+**Files:** `src/handlers/resource.js`
+
+When mashlib PUTs `profile/card` with `Content-Type: text/turtle`, the
+`urlToStoragePath` helper maps it to `card$.ttl` based on the incoming
+content type. The existing file on disk is `card$.jsonld` (created during
+pod setup). The old code then called `resolveDollarPath('card$.ttl', …)`
+which saw an extension and returned immediately — never finding the real
+file. Result: 412 Precondition Failed.
+
+Fix: save the original extensionless URL path before `urlToStoragePath`
+transforms it, and pass that original path to `resolveDollarPath` so it
+can find the existing file regardless of which `$ext` it uses on disk.
 
 ---
 

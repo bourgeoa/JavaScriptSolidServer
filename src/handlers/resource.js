@@ -1027,6 +1027,11 @@ export async function handlePut(request, reply) {
 
   const inputType = ctMain;
   // Preserve Solid extensionless RDF URL behavior on disk (card$.jsonld etc.).
+  // Save the original URL path before transformation — resolveDollarPath
+  // needs it to find existing files whose on-disk extension may differ
+  // from the incoming Content-Type (e.g. profile/card stored as
+  // card$.jsonld but PUT with Content-Type: text/turtle).
+  const originalStoragePath = storagePath;
   storagePath = urlToStoragePath(storagePath, inputType);
 
   // Check if we can accept this input type
@@ -1044,10 +1049,13 @@ export async function handlePut(request, reply) {
     });
   }
 
-  // Check if resource already exists and get current ETag
+  // Check if resource already exists and get current ETag.
+  // Try the urlToStoragePath result first; if that misses, resolve
+  // from the original URL path so cross-format overwrites (Turtle PUT
+  // over JSON-LD storage) find the existing file.
   let stats = await storage.stat(storagePath);
   if (!stats) {
-    const resolved = await resolveDollarPath(storagePath, (p) => storage.stat(p));
+    const resolved = await resolveDollarPath(originalStoragePath, (p) => storage.stat(p));
     if (resolved !== storagePath) {
       storagePath = resolved;
       stats = await storage.stat(resolved);
