@@ -149,8 +149,7 @@ function parseRangeHeader(rangeHeader, fileSize) {
  * so the ETag must differ too — otherwise browsers confuse cached
  * JSON-LD with the HTML variant despite Vary: Accept (#456).
  */
-function getMashlibEtag(request, stats, storagePath) {
-  const storedType = stats.isDirectory ? 'application/ld+json' : getContentType(storagePath);
+function getMashlibEtag(request, stats, storedType) {
   const willServeMashlib =
     shouldServeMashlib(request, request.mashlibEnabled, storedType);
   const effectiveEtag = willServeMashlib
@@ -182,7 +181,21 @@ export async function handleGet(request, reply) {
     return reply.code(404).send({ error: 'Not Found' });
   }
 
-  const { willServeMashlib, effectiveEtag } = getMashlibEtag(request, stats, storagePath);
+  // Resolve content type from path, with content-based fallback for
+  // extensionless / $ -escaped files that path-based detection misses.
+  let storedContentType = stats.isDirectory
+    ? 'application/ld+json'
+    : getContentType(storagePath);
+  if (storedContentType === 'application/octet-stream') {
+    const peek = await storage.read(storagePath);
+    if (peek) {
+      const head = peek.toString('utf8', 0, 256).trimStart();
+      if (head.startsWith('{') || head.startsWith('[')) storedContentType = 'application/ld+json';
+      else if (head.startsWith('@prefix') || head.startsWith('@base')) storedContentType = 'text/turtle';
+    }
+  }
+
+  const { willServeMashlib, effectiveEtag } = getMashlibEtag(request, stats, storedContentType);
 
   // For non-containers, check If-None-Match early using the effective
   // ETag. For containers, defer the check until we know which branch
@@ -420,17 +433,6 @@ export async function handleGet(request, reply) {
   }
 
   // Handle resource
-  let storedContentType = getContentType(storagePath);
-  // Content-based fallback: when path-based detection returns octet-stream
-  // (extensionless URLs, $ -escaped files, etc.), peek at the content.
-  if (storedContentType === 'application/octet-stream') {
-    const peek = await storage.read(storagePath);
-    if (peek) {
-      const head = peek.toString('utf8', 0, 256).trimStart();
-      if (head.startsWith('{') || head.startsWith('[')) storedContentType = 'application/ld+json';
-      else if (head.startsWith('@prefix') || head.startsWith('@base')) storedContentType = 'text/turtle';
-    }
-  }
   const connegEnabled = request.connegEnabled || false;
 
   // Check if we should serve Mashlib data browser
@@ -889,7 +891,17 @@ export async function handleHead(request, reply) {
       isMashlibResponse = true;
     }
   } else {
-    const { willServeMashlib, effectiveEtag } = getMashlibEtag(request, stats, storagePath);
+    const storedType = getContentType(storagePath);
+    let effective = storedType;
+    if (effective === 'application/octet-stream') {
+      const peek = await storage.read(storagePath);
+      if (peek) {
+        const head = peek.toString('utf8', 0, 256).trimStart();
+        if (head.startsWith('{') || head.startsWith('[')) effective = 'application/ld+json';
+        else if (head.startsWith('@prefix') || head.startsWith('@base')) effective = 'text/turtle';
+      }
+    }
+    const { willServeMashlib, effectiveEtag } = getMashlibEtag(request, stats, effective);
     headEtag = effectiveEtag;
     isMashlibResponse = willServeMashlib;
     // contentType for files is negotiated AFTER the If-None-Match check
