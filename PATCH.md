@@ -93,6 +93,19 @@ and `/api/v1/` prefix matching.
 - Adopted origin's `getMashlibEtag` refactoring for mashlib-aware ETags.
 - Fixed missing `shouldServeMashlib` import causing 500 on all requests.
 
+### Cross-format PUT fix (dollar-escape)
+
+When mashlib PUTs `profile/card` with `Content-Type: text/turtle`, the
+`urlToStoragePath` helper maps it to `card$.ttl` based on the incoming
+content type. The existing file on disk is `card$.jsonld` (created during
+pod setup). The old code then called `resolveDollarPath('card$.ttl', …)`
+which saw an extension and returned immediately — never finding the real
+file. Result: 412 Precondition Failed.
+
+Fix: save the original extensionless URL path before `urlToStoragePath`
+transforms it, and pass that original path to `resolveDollarPath` so it
+can find the existing file regardless of which `$ext` it uses on disk.
+
 ---
 
 ## 6. Turtle.js — binary merge + restore + NUL sentinel fix
