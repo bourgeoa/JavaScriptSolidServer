@@ -262,7 +262,15 @@ function getPodNameFromPath(urlPath) {
  * @returns {string}
  */
 export function getContentType(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
+  // Solid $ convention: files on disk use `name$.jsonld` / `name$.ttl`.
+  // path.extname normally sees the real extension (.jsonld), but the $
+  // can confuse some mime-type lookups. Extract the extension from the
+  // last `$ext` segment explicitly so the overrides are always hit.
+  const dollarIdx = filePath.lastIndexOf('$');
+  const rdfExt = dollarIdx !== -1
+    ? path.extname(filePath.slice(dollarIdx)).toLowerCase()
+    : '';
+  const ext = rdfExt || path.extname(filePath).toLowerCase();
 
   // Solid-specific overrides — types the `mime-types` db doesn't know, or
   // where Solid semantics differ. Checked before falling back to mime-types

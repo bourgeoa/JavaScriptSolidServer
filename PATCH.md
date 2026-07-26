@@ -106,6 +106,25 @@ Fix: save the original extensionless URL path before `urlToStoragePath`
 transforms it, and pass that original path to `resolveDollarPath` so it
 can find the existing file regardless of which `$ext` it uses on disk.
 
+### Turtle round-trip fidelity: no JSON-LD conversion for .ttl/.n3 files
+
+**Files:** `src/handlers/resource.js`
+
+Previously, ALL Turtle/N3 PUTs were converted to JSON-LD before storage
+when conneg was enabled — even for `.ttl` files. This caused:
+
+- **Relative IRI loss**: the n3 `Parser` resolves relative IRIs against
+  the base URL during Turtle→JSON-LD. The n3 `Writer` can't recover them.
+- **Default prefix spam**: the hardcoded `DEFAULT_PREFIXES` (rdf, rdfs,
+  xsd, foaf, ldp, solid, acl, pim, dc, schema, vcard) were injected into
+  every Turtle output regardless of the original document.
+
+Fix: only convert Turtle/N3→JSON-LD for **extensionless** URLs (which use
+the `$`-escape convention) and for `.acl`/`.meta` dotfiles (which are
+always JSON-LD per `getContentType`). Files with `.ttl`/`.n3` extensions
+keep their native format on disk and are served as-is. The GET handler already handles this gracefully — `safeJsonParse`
+fails on raw Turtle bytes and falls through to "serve as-is".
+
 ---
 
 ## 6. Turtle.js — binary merge + restore + NUL sentinel fix
