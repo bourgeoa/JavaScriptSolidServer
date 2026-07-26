@@ -420,7 +420,17 @@ export async function handleGet(request, reply) {
   }
 
   // Handle resource
-  const storedContentType = getContentType(storagePath);
+  let storedContentType = getContentType(storagePath);
+  // Content-based fallback: when path-based detection returns octet-stream
+  // (extensionless URLs, $ -escaped files, etc.), peek at the content.
+  if (storedContentType === 'application/octet-stream') {
+    const peek = await storage.read(storagePath);
+    if (peek) {
+      const head = peek.toString('utf8', 0, 256).trimStart();
+      if (head.startsWith('{') || head.startsWith('[')) storedContentType = 'application/ld+json';
+      else if (head.startsWith('@prefix') || head.startsWith('@base')) storedContentType = 'text/turtle';
+    }
+  }
   const connegEnabled = request.connegEnabled || false;
 
   // Check if we should serve Mashlib data browser
@@ -458,12 +468,10 @@ export async function handleGet(request, reply) {
           // it needs to; we don't pre-validate or pre-decode here.
           embedJsonLd = buf;
         } else {
-          // Turtle / N3 URL. JSS stores everything as JSON-LD on
-          // disk (PUT converts), so try JSON parse first and pass
-          // the *decoded text* through (avoids a second decode
-          // inside dataIsland's String() coercion). Fall back to a
-          // Turtle parse for files placed on the filesystem
-          // out-of-band in their native format.
+          // Turtle / N3 URL. For extensionless URLs JSS stores as
+          // JSON-LD on disk (PUT converts via $ convention), so try
+          // JSON parse first. For .ttl/.n3 files the bytes are raw
+          // Turtle/N3 — fall back to a Turtle parse.
           const text = buf.toString('utf8');
           try {
             JSON.parse(text);
@@ -1033,6 +1041,10 @@ export async function handlePut(request, reply) {
   // card$.jsonld but PUT with Content-Type: text/turtle).
   const originalStoragePath = storagePath;
   storagePath = urlToStoragePath(storagePath, inputType);
+  // .ttl / .n3 files keep their native format on disk (no JSON-LD
+  // round-trip). Everything else — .json, .jsonld, extensionless
+  // ($ convention), .acl, .meta — uses canonical JSON-LD storage.
+  const isTurtleNativeExt = urlPath.endsWith('.ttl') || urlPath.endsWith('.n3');
 
   // Check if we can accept this input type
   if (!canAcceptInput(contentType, connegEnabled)) {
@@ -1096,8 +1108,9 @@ export async function handlePut(request, reply) {
     content = Buffer.from('');
   }
 
-  // Convert Turtle/N3 to JSON-LD if conneg enabled
-  if (connegEnabled && (inputType === RDF_TYPES.TURTLE || inputType === RDF_TYPES.N3)) {
+  // Convert Turtle/N3 to JSON-LD for canonical storage. Only skip for
+  // .ttl/.n3 URLs — those keep their native format on disk.
+  if (connegEnabled && !isTurtleNativeExt && (inputType === RDF_TYPES.TURTLE || inputType === RDF_TYPES.N3)) {
     try {
       const jsonLd = await toJsonLd(content, contentType, resourceUrl, connegEnabled);
       content = Buffer.from(JSON.stringify(jsonLd, null, 2));
