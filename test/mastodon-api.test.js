@@ -64,6 +64,17 @@ describe('Mastodon API (activitypub enabled)', () => {
     });
   });
 
+  // ── streaming health ─────────────────────────────────────────────────────
+
+  describe('GET /api/v1/streaming/health', () => {
+    it('should return ok (Phanpy/Elk probe before opening the socket)', async () => {
+      const res = await request('/api/v1/streaming/health');
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.strictEqual(body.ok, true);
+    });
+  });
+
   // ── account lookup ───────────────────────────────────────────────────────
 
   describe('GET /api/v1/accounts/lookup', () => {

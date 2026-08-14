@@ -400,6 +400,13 @@ export async function activityPubPlugin(fastify, options = {}) {
   fastify.get('/api/v1/streaming', { websocket: true }, streamingDispatch)
   fastify.get('/api/v1/streaming/', { websocket: true }, streamingDispatch)
 
+  // Mastodon streaming health probe — Phanpy/Elk check this endpoint before
+  // opening the streaming WebSocket; a 404 there makes some clients abort
+  // streaming setup entirely.
+  fastify.get('/api/v1/streaming/health', async (request, reply) => {
+    return reply.send({ ok: true })
+  })
+
   fastify.post('/api/v1/apps', createAppsHandler())
   fastify.get('/api/v1/accounts/verify_credentials', createVerifyCredentialsHandler(getUserConfig))
   fastify.patch('/api/v1/accounts/update_credentials', createUpdateCredentialsHandler())
