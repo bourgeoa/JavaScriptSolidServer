@@ -620,6 +620,47 @@ describe('Content Negotiation (conneg disabled - default)', () => {
     });
   });
 
+  // solid-panes' isPodStorage() validates pods by checking the container
+  // listing for a pim:Storage type — the navbar's Storage item depends on
+  // it (the podUtils Storage-missing bug).
+  describe('pod root is typed pim:Storage', () => {
+    it('JSON-LD listing includes pim:Storage in @type', async () => {
+      const res = await request('/noconneg/', {
+        headers: { 'Accept': 'application/ld+json' },
+        auth: 'noconneg'
+      });
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(body['@type'] && body['@type'].includes('pim:Storage'),
+        `pod root should be typed pim:Storage, got: ${JSON.stringify(body['@type'])}`);
+    });
+
+    it('Turtle listing declares pim:Storage (the isPodStorage check)', async () => {
+      const res = await request('/noconneg/', {
+        headers: { 'Accept': 'text/turtle' },
+        auth: 'noconneg'
+      });
+      assertStatus(res, 200);
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
+      const turtle = await res.text();
+      assert.ok(
+        turtle.includes('pim:Storage') || turtle.includes('http://www.w3.org/ns/pim/space#Storage'),
+        `Turtle listing should declare pim:Storage, got: ${turtle.slice(0, 200)}`
+      );
+    });
+
+    it('non-pod containers are not typed pim:Storage', async () => {
+      const res = await request('/noconneg/public/', {
+        headers: { 'Accept': 'application/ld+json' },
+        auth: 'noconneg'
+      });
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(!body['@type'] || !body['@type'].includes('pim:Storage'),
+        'sub-container must not be typed pim:Storage');
+    });
+  });
+
   // The .acl content-type guard applies regardless of conneg setting (#295).
   // The default deployment configuration is conneg disabled, so ensure the
   // guard fires there too.

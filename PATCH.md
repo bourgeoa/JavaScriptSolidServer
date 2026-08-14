@@ -275,6 +275,30 @@ response as Turtle, which got JSON-LD before.
 
 ---
 
+## 11. Pod roots typed `pim:Storage`
+
+**Files:** `src/ldp/container.js`, `src/handlers/resource.js`, `test/conneg.test.js`
+
+solid-panes discovers storage by checking the container the WebID profile
+points at via `pim:storage` for a `pim:Storage` type (`isPodStorage()`). JSS
+listings only carried `ldp:Container/BasicContainer/Resource`, so the Storage
+navbar item never appeared.
+
+`generateContainerJsonLd()` now takes an `isPodStorage` flag and adds
+`pim:Storage` to the container's `@type` (with a `pim` context prefix).
+`handleGet` computes the flag with a new `isPodRootContainer()` helper:
+
+- root-pod (single-user): `/`
+- subdomain mode: `/` (the pod's origin root)
+- path-based / single-user named pods: `/<podName>/`
+- public mode: never
+
+Both the JSON-LD listing and its Turtle conversion now declare
+`<> a pim:Storage` on pod roots, completing the Storage-navbar fix from
+section 10.
+
+---
+
 ## Test summary
 
 ```

@@ -73,6 +73,23 @@ function injectLiveReload(content) {
 }
 
 /**
+ * Whether the requested container is the root of a pod — the container
+ * that should be typed pim:Storage in listings so Solid clients
+ * (solid-panes, mashlib) can discover it from the WebID profile's
+ * pim:storage link.
+ */
+function isPodRootContainer(request, urlPath) {
+  if (request.config?.public) return false;
+  const podName = getPodName(request);
+  if (!podName) return false;
+  if (podName === '.') return urlPath === '/'; // root-pod (single-user)
+  // Subdomain mode: the pod is served at the origin root.
+  if (request.subdomainsEnabled && request.podName) return urlPath === '/';
+  // Path-based mode (and single-user named pods): /<podName>/
+  return urlPath === '/' + podName + '/';
+}
+
+/**
  * Get the storage path and resource URL for a request
  * In subdomain mode, storage path includes pod name, URL uses subdomain
  */
@@ -342,7 +359,7 @@ export async function handleGet(request, reply) {
     }
 
     const entries = await storage.listContainer(storagePath);
-    const jsonLd = generateContainerJsonLd(resourceUrl, entries || []);
+    const jsonLd = generateContainerJsonLd(resourceUrl, entries || [], isPodRootContainer(request, urlPath));
 
     // Check if we should serve Mashlib data browser for containers
     const containerMashlibDecision = getMashlibDecision(request, request.mashlibEnabled, 'application/ld+json');

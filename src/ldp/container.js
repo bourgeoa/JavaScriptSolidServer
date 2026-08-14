@@ -5,6 +5,7 @@
 import { fileNameToUrlName } from '../utils/dollar-escape.js';
 
 const LDP = 'http://www.w3.org/ns/ldp#';
+const PIM = 'http://www.w3.org/ns/pim/space#';
 
 // Dotfiles allowed to appear in ldp:contains. Anything else starting with '.'
 // is server-internal state and must not leak into container listings — even
@@ -38,9 +39,13 @@ function isHiddenEntry(name) {
  * Generate JSON-LD representation of a container
  * @param {string} containerUrl - Full URL of the container
  * @param {Array<{name: string, isDirectory: boolean}>} entries - Container contents
+ * @param {boolean} [isPodStorage=false] - When true, also type the container
+ *   as pim:Storage (pod root). Solid clients (solid-panes, mashlib, etc.)
+ *   discover storage locations by checking this type on the container the
+ *   WebID profile points at via pim:storage.
  * @returns {object} - JSON-LD representation
  */
-export function generateContainerJsonLd(containerUrl, entries) {
+export function generateContainerJsonLd(containerUrl, entries, isPodStorage = false) {
   // Ensure container URL ends with /
   const baseUrl = containerUrl.endsWith('/') ? containerUrl : containerUrl + '/';
 
@@ -56,15 +61,19 @@ export function generateContainerJsonLd(containerUrl, entries) {
     return item;
   });
 
+  const containerTypes = ['ldp:Container', 'ldp:BasicContainer', 'ldp:Resource'];
+  if (isPodStorage) containerTypes.push('pim:Storage');
+
   return {
     '@context': {
       'ldp': LDP,
+      'pim': PIM,
       'stat': 'http://www.w3.org/ns/posix/stat#',
       'dcterms': 'http://purl.org/dc/terms/',
       'contains': { '@id': 'ldp:contains', '@type': '@id' }
     },
     '@id': baseUrl,
-    '@type': ['ldp:Container', 'ldp:BasicContainer', 'ldp:Resource'],
+    '@type': containerTypes,
     'contains': contains
   };
 }
