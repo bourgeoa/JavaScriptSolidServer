@@ -2,8 +2,13 @@
  * Content Negotiation for RDF Resources
  *
  * Handles Accept header parsing and format selection.
- * OFF by default - this is a JSON-LD native implementation.
- * Enable with { conneg: true } in server options.
+ *
+ * JSS is a JSON-LD native implementation: without --conneg, generic or
+ * absent Accept headers get JSON-LD. Explicit requests for supported RDF
+ * types (Turtle/N3) are honored regardless of --conneg, since the Solid
+ * Protocol requires Turtle support. --conneg additionally tunes the
+ * default representation (Turtle for extensionless RDF URLs, text/*
+ * handling, Turtle/N3 on the write side).
  */
 
 import { turtleToJsonLd, jsonLdToTurtle } from './turtle.js';
@@ -18,10 +23,8 @@ export const RDF_TYPES = {
   RDF_XML: 'application/rdf+xml'  // Not supported, but recognized
 };
 
-// Content types we can serve (when conneg enabled)
-const SUPPORTED_OUTPUT = [RDF_TYPES.JSON_LD, RDF_TYPES.TURTLE];
-
-// Content types we can accept for input (when conneg enabled)
+// Content types we can accept for input (always for Turtle/N3 — the Solid
+// Protocol requires Turtle support — and under conneg for the rest)
 const SUPPORTED_INPUT = [RDF_TYPES.JSON_LD, RDF_TYPES.TURTLE, RDF_TYPES.N3];
 
 /**
@@ -29,31 +32,36 @@ const SUPPORTED_INPUT = [RDF_TYPES.JSON_LD, RDF_TYPES.TURTLE, RDF_TYPES.N3];
  * @param {string} acceptHeader - Accept header value
  * @param {boolean} connegEnabled - Whether content negotiation is enabled
  * @returns {string} Selected content type
+ *
+ * Explicitly named, supported RDF types are honored regardless of the
+ * --conneg flag (the Solid Protocol requires Turtle support). The flag
+ * only changes what generic Accept values (no Accept, a wildcard, or
+ * text wildcard) resolve to: the JSON-LD native default when off,
+ * Turtle-friendly handling when on.
  */
 export function selectContentType(acceptHeader, connegEnabled = false) {
-  // If conneg disabled, always return JSON-LD
-  if (!connegEnabled) {
-    return RDF_TYPES.JSON_LD;
-  }
-
-  if (!acceptHeader) {
-    return RDF_TYPES.JSON_LD;
-  }
-
-  // Parse Accept header
-  const accepts = parseAcceptHeader(acceptHeader);
+  // Parse Accept header (q-sorted, highest weight first)
+  const accepts = parseAcceptHeader(acceptHeader || '');
 
   // Find best match
   for (const { type } of accepts) {
-    if (type === '*/*' || type === 'application/*') {
-      return RDF_TYPES.JSON_LD;
-    }
-    if (SUPPORTED_OUTPUT.includes(type)) {
+    // Explicit RDF requests are always honored — a Solid client asking for
+    // Turtle must get Turtle even on a JSON-LD-native deployment.
+    if (type === RDF_TYPES.TURTLE || type === RDF_TYPES.N3) {
       return type;
     }
-    // Handle text/* preference
-    if (type === 'text/*') {
-      return RDF_TYPES.TURTLE;
+    if (type === RDF_TYPES.JSON_LD || type === 'application/json') {
+      return RDF_TYPES.JSON_LD;
+    }
+    // Generic Accept values only get Turtle-friendly handling under --conneg.
+    if (connegEnabled) {
+      if (type === '*/*' || type === 'application/*') {
+        return RDF_TYPES.JSON_LD;
+      }
+      // Handle text/* preference
+      if (type === 'text/*') {
+        return RDF_TYPES.TURTLE;
+      }
     }
   }
 
@@ -115,12 +123,18 @@ export function canAcceptInput(contentType, connegEnabled = false) {
     return true;
   }
 
-  // RDF types other than JSON-LD only if conneg enabled
+  // Turtle/N3 are accepted regardless of the --conneg flag (the Solid
+  // Protocol requires Turtle support).
+  if (type === RDF_TYPES.TURTLE || type === RDF_TYPES.N3) {
+    return true;
+  }
+
+  // Remaining RDF types (e.g. rdf+xml) only if conneg enabled
   if (connegEnabled) {
     return SUPPORTED_INPUT.includes(type);
   }
 
-  // RDF type but conneg disabled - reject (should use JSON-LD)
+  // RDF type but unsupported - reject
   return false;
 }
 
@@ -141,8 +155,9 @@ export async function toJsonLd(content, contentType, baseUri, connegEnabled = fa
     return safeJsonParse(text);
   }
 
-  // Turtle/N3 - only if conneg enabled
-  if (connegEnabled && (type === RDF_TYPES.TURTLE || type === RDF_TYPES.N3)) {
+  // Turtle/N3 - convert to JSON-LD (the internal storage format).
+  // Accepted regardless of --conneg (Solid requires Turtle support).
+  if (type === RDF_TYPES.TURTLE || type === RDF_TYPES.N3) {
     return turtleToJsonLd(text, baseUri);
   }
 
@@ -158,29 +173,15 @@ export async function toJsonLd(content, contentType, baseUri, connegEnabled = fa
  * @returns {Promise<{content: string, contentType: string}>}
  */
 export async function fromJsonLd(jsonLd, targetType, baseUri, connegEnabled = false) {
-  // If conneg disabled, always output JSON-LD
-  if (!connegEnabled) {
-    return {
-      content: JSON.stringify(jsonLd, null, 2),
-      contentType: RDF_TYPES.JSON_LD
-    };
-  }
-
-  // JSON-LD
-  if (targetType === RDF_TYPES.JSON_LD || !targetType) {
-    return {
-      content: JSON.stringify(jsonLd, null, 2),
-      contentType: RDF_TYPES.JSON_LD
-    };
-  }
-
-  // Turtle
+  // The targetType drives the output; connegEnabled is kept for call-site
+  // compatibility. Explicit Turtle requests are honored on all deployments
+  // (Solid requires Turtle support).
   if (targetType === RDF_TYPES.TURTLE) {
     const turtle = await jsonLdToTurtle(jsonLd, baseUri);
     return { content: turtle, contentType: RDF_TYPES.TURTLE };
   }
 
-  // Fallback to JSON-LD
+  // JSON-LD (or fallback for any other type)
   return {
     content: JSON.stringify(jsonLd, null, 2),
     contentType: RDF_TYPES.JSON_LD
@@ -199,20 +200,20 @@ export async function fromJsonLd(jsonLd, targetType, baseUri, connegEnabled = fa
  * - `Origin` — CORS headers echo the request's Origin
  */
 export function getVaryHeader(connegEnabled, mashlibEnabled = false) {
-  return (connegEnabled || mashlibEnabled)
-    ? 'Accept, Authorization, Origin'
-    : 'Authorization, Origin';
+  // Response bodies now depend on Accept on every deployment — explicit
+  // text/turtle requests are honored even without --conneg — so Vary must
+  // always list Accept. The flags are kept for call-site compatibility.
+  return 'Accept, Authorization, Origin';
 }
 
 /**
  * Get Accept-* headers for responses.
  *
- * The explicitly listed RDF types are aligned with the formats this
- * module accepts so clients can discover support consistently:
+ * The advertised RDF types are aligned with what this module accepts:
  *   - JSON-LD (application/ld+json) and JSON (application/json alias)
- *     are advertised in all conneg modes.
- *   - Turtle (text/turtle) and N3 (text/n3) are advertised only when
- *     conneg is enabled (SUPPORTED_INPUT in this file).
+ *   - Turtle (text/turtle) and N3 (text/n3) on every deployment —
+ *     canAcceptInput() accepts them regardless of --conneg (Solid
+ *     requires Turtle support).
  *
  * Note: a wildcard (asterisk-slash-asterisk) is included as a broad
  * interoperability hint for generic clients and proxies. It is not a
@@ -224,14 +225,10 @@ export function getAcceptHeaders(connegEnabled, isContainer = false) {
   const headers = {};
 
   if (isContainer) {
-    headers['Accept-Post'] = connegEnabled
-      ? `${RDF_TYPES.JSON_LD}, application/json, ${RDF_TYPES.TURTLE}, ${RDF_TYPES.N3}, */*`
-      : `${RDF_TYPES.JSON_LD}, application/json, */*`;
+    headers['Accept-Post'] = `${RDF_TYPES.JSON_LD}, application/json, ${RDF_TYPES.TURTLE}, ${RDF_TYPES.N3}, */*`;
   }
 
-  headers['Accept-Put'] = connegEnabled
-    ? `${RDF_TYPES.JSON_LD}, application/json, ${RDF_TYPES.TURTLE}, ${RDF_TYPES.N3}, */*`
-    : `${RDF_TYPES.JSON_LD}, application/json, */*`;
+  headers['Accept-Put'] = `${RDF_TYPES.JSON_LD}, application/json, ${RDF_TYPES.TURTLE}, ${RDF_TYPES.N3}, */*`;
 
   headers['Accept-Patch'] = 'text/n3, application/sparql-update';
 

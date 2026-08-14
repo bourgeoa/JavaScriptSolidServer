@@ -241,10 +241,10 @@ export async function handleGet(request, reply) {
       // naive `acceptHeader.includes('text/turtle')` we used to do here
       // ignored q-weights — `Accept: application/ld+json, text/turtle;q=0.1`
       // would still pick Turtle even though JSON-LD was preferred (#325).
+      // Explicit RDF requests are honored regardless of --conneg (Solid
+      // requires Turtle support); the flag only changes generic defaults.
       const acceptHeader = request.headers.accept || '';
-      const negotiated = connegEnabled
-        ? selectContentType(acceptHeader, true)
-        : null;
+      const negotiated = selectContentType(acceptHeader, connegEnabled);
       const wantsTurtle = negotiated === RDF_TYPES.TURTLE
         || negotiated === RDF_TYPES.N3
         || negotiated === 'application/n-triples'
@@ -380,10 +380,10 @@ export async function handleGet(request, reply) {
     }
 
     // Pick the negotiated RDF type using q-aware Accept parsing (#325).
+    // Explicit RDF requests are honored regardless of --conneg (Solid
+    // requires Turtle support); the flag only changes generic defaults.
     const acceptHeader = request.headers.accept || '';
-    const negotiated = connegEnabled
-      ? selectContentType(acceptHeader, true)
-      : null;
+    const negotiated = selectContentType(acceptHeader, connegEnabled);
     const wantsTurtle = negotiated === RDF_TYPES.TURTLE
       || negotiated === RDF_TYPES.N3
       || negotiated === 'application/n-triples';
@@ -557,20 +557,25 @@ export async function handleGet(request, reply) {
     return reply.code(500).send({ error: 'Read error' });
   }
 
-  // Content negotiation for RDF resources (including HTML with JSON-LD data islands)
-  if (connegEnabled) {
-    const contentStr = content.toString();
-    const acceptHeader = request.headers.accept || '';
-    // Serve Turtle if: URL ends with .ttl OR Accept's q-weighted top
-    // RDF type is Turtle/N3 (#325 — naive substring matching ignored
-    // q-weights and would pick Turtle whenever it appeared in Accept).
-    const negotiated = selectContentType(acceptHeader, true);
-    const wantsTurtle = urlPath.endsWith('.ttl')
-      || negotiated === RDF_TYPES.TURTLE
-      || negotiated === RDF_TYPES.N3
-      || negotiated === 'application/n-triples'
-      || prefersTurtleForExtensionlessRdf(urlPath, acceptHeader, connegEnabled);
+  // Content negotiation for RDF resources (including HTML with JSON-LD
+  // data islands). Explicit Turtle requests are honored regardless of
+  // --conneg (Solid requires Turtle support); the flag only changes the
+  // default representation for generic Accept.
+  const acceptHeader = request.headers.accept || '';
+  // Serve Turtle if: URL ends with .ttl OR Accept's q-weighted top
+  // RDF type is Turtle/N3 (#325 — naive substring matching ignored
+  // q-weights and would pick Turtle whenever it appeared in Accept).
+  const negotiated = selectContentType(acceptHeader, connegEnabled);
+  const wantsTurtle = urlPath.endsWith('.ttl')
+    || negotiated === RDF_TYPES.TURTLE
+    || negotiated === RDF_TYPES.N3
+    || negotiated === 'application/n-triples'
+    || prefersTurtleForExtensionlessRdf(urlPath, acceptHeader, connegEnabled);
 
+  // Only pay the decode/convert cost when a variant is actually produced
+  // (Turtle requested, or conneg on for an RDF resource).
+  if (wantsTurtle || (connegEnabled && isRdfContentType(storedContentType))) {
+    const contentStr = content.toString();
     // Check if this is HTML with JSON-LD data island
     const isHtmlWithDataIsland = contentStr.trimStart().startsWith('<!DOCTYPE') ||
                                   contentStr.trimStart().startsWith('<html');
@@ -734,15 +739,17 @@ async function negotiateHeadFileContentType({ storagePath, urlPath, stats, accep
   const storedContentType = getContentType(storagePath);
   const fitsFullRead = stats.size <= HEAD_FULL_READ_MAX_BYTES;
 
-  if (connegEnabled) {
-    // Same negotiation as handleGet's file branch (#325 q-aware).
-    const negotiated = selectContentType(acceptHeader, true);
-    const wantsTurtle = urlPath.endsWith('.ttl')
-      || negotiated === RDF_TYPES.TURTLE
-      || negotiated === RDF_TYPES.N3
-      || negotiated === 'application/n-triples'
-      || prefersTurtleForExtensionlessRdf(urlPath, acceptHeader, connegEnabled);
+  // Same negotiation as handleGet's file branch (#325 q-aware). Explicit
+  // RDF requests are honored regardless of --conneg (Solid requires Turtle
+  // support); the flag only changes generic defaults.
+  const negotiated = selectContentType(acceptHeader, connegEnabled);
+  const wantsTurtle = urlPath.endsWith('.ttl')
+    || negotiated === RDF_TYPES.TURTLE
+    || negotiated === RDF_TYPES.N3
+    || negotiated === 'application/n-triples'
+    || prefersTurtleForExtensionlessRdf(urlPath, acceptHeader, connegEnabled);
 
+  if (wantsTurtle || (connegEnabled && isRdfContentType(storedContentType))) {
     if (isRdfContentType(storedContentType)) {
       const targetType = wantsTurtle ? 'text/turtle' : selectContentType(acceptHeader, connegEnabled);
       if (!fitsFullRead) {
@@ -874,10 +881,21 @@ export async function handleHead(request, reply) {
       } else {
         contentType = indexExists ? 'text/html' : 'application/ld+json';
       }
-    } else if (indexExists) {
-      contentType = 'text/html';
     } else {
-      contentType = 'application/ld+json';
+      // Conneg off: explicit Turtle requests are still honored so HEAD
+      // mirrors GET (Solid requires Turtle support).
+      const negotiated = selectContentType(acceptHeader, connegEnabled);
+      const wantsTurtle = negotiated === RDF_TYPES.TURTLE
+        || negotiated === RDF_TYPES.N3
+        || negotiated === 'application/n-triples';
+      const explicitJson = EXPLICIT_JSON_RE.test(acceptHeader);
+      if (wantsTurtle) {
+        contentType = 'text/turtle';
+      } else if (indexExists && !explicitJson) {
+        contentType = 'text/html';
+      } else {
+        contentType = 'application/ld+json';
+      }
     }
 
     if (indexExists) {
@@ -1022,26 +1040,20 @@ export async function handlePut(request, reply) {
 
   const contentType = request.headers['content-type'] || '';
 
-  // ACL resources require a JSON-LD payload (application/ld+json or
-  // application/json). Round-trip serialization between JSON-LD and
-  // Turtle representations has limitations that can cause data loss
-  // when a client PUTs Turtle and later requests Turtle.
-  // Other RDF resources are unaffected. The guard fires regardless
-  // of conneg setting and also when Content-Type is missing.
+  // ACL resources accept JSON-LD/JSON and Turtle/N3 payloads; Turtle/N3
+  // is converted to JSON-LD before write (canonical storage). Turtle
+  // support is unconditional (Solid requires Turtle support). The guard
+  // fires also when Content-Type is missing.
   const ctMain = contentType.split(';')[0].trim().toLowerCase();
   const isJsonLd = ctMain === 'application/ld+json' || ctMain === 'application/json';
   const isConnegAclType = ctMain === RDF_TYPES.TURTLE || ctMain === RDF_TYPES.N3;
-  if (urlPath.endsWith('.acl') && !(isJsonLd || (connegEnabled && isConnegAclType))) {
-    const acceptValue = connegEnabled
-      ? 'application/ld+json, application/json, text/turtle, text/n3'
-      : 'application/ld+json, application/json';
+  if (urlPath.endsWith('.acl') && !(isJsonLd || isConnegAclType)) {
+    const acceptValue = 'application/ld+json, application/json, text/turtle, text/n3';
     reply.header('Accept', acceptValue);
     reply.header('Accept-Put', acceptValue);
     return reply.code(415).send({
       error: 'Unsupported Media Type',
-      message: connegEnabled
-        ? 'ACL resources must be sent as application/ld+json, application/json, text/turtle, or text/n3.'
-        : 'ACL resources must be sent as application/ld+json or application/json.'
+      message: 'ACL resources must be sent as application/ld+json, application/json, text/turtle, or text/n3.'
     });
   }
 
@@ -1060,16 +1072,12 @@ export async function handlePut(request, reply) {
 
   // Check if we can accept this input type
   if (!canAcceptInput(contentType, connegEnabled)) {
-    const acceptValue = connegEnabled
-      ? 'application/ld+json, application/json, text/turtle, text/n3'
-      : 'application/ld+json, application/json';
+    const acceptValue = 'application/ld+json, application/json, text/turtle, text/n3';
     reply.header('Accept', acceptValue);
     reply.header('Accept-Put', acceptValue);
     return reply.code(415).send({
       error: 'Unsupported Media Type',
-      message: connegEnabled
-        ? 'Supported types: application/ld+json, application/json, text/turtle, text/n3'
-        : 'Supported types: application/ld+json, application/json (enable conneg for Turtle/N3 support)'
+      message: 'Supported types: application/ld+json, application/json, text/turtle, text/n3'
     });
   }
 
@@ -1120,9 +1128,10 @@ export async function handlePut(request, reply) {
     content = Buffer.from('');
   }
 
-  // Convert Turtle/N3 to JSON-LD for canonical storage. Only skip for
-  // .ttl/.n3 URLs — those keep their native format on disk.
-  if (connegEnabled && !isTurtleNativeExt && (inputType === RDF_TYPES.TURTLE || inputType === RDF_TYPES.N3)) {
+  // Convert Turtle/N3 to JSON-LD for canonical storage (Solid requires
+  // Turtle support, so this applies regardless of --conneg). Only skip
+  // for .ttl/.n3 URLs — those keep their native format on disk.
+  if (!isTurtleNativeExt && (inputType === RDF_TYPES.TURTLE || inputType === RDF_TYPES.N3)) {
     try {
       const jsonLd = await toJsonLd(content, contentType, resourceUrl, connegEnabled);
       content = Buffer.from(JSON.stringify(jsonLd, null, 2));

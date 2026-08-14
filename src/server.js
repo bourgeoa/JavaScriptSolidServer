@@ -41,7 +41,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * Create and configure Fastify server
  * @param {object} options - Server options
  * @param {boolean} options.logger - Enable logging (default true)
- * @param {boolean} options.conneg - Enable content negotiation for RDF (default false)
+ * @param {boolean} options.conneg - Content negotiation for generic Accept values; explicit Turtle/N3 requests are always honored (default false)
  * @param {boolean} options.notifications - Enable WebSocket notifications (default false)
  * @param {boolean} options.idp - Enable built-in Identity Provider (default false)
  * @param {string} options.idpIssuer - IdP issuer URL (default: server URL)

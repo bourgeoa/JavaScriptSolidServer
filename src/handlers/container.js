@@ -44,18 +44,15 @@ export async function handlePost(request, reply) {
   const connegEnabled = request.connegEnabled || false;
   const contentType = request.headers['content-type'] || '';
 
-  // Check if we can accept this input type
+  // Check if we can accept this input type (Turtle/N3 are always accepted —
+  // Solid requires Turtle support)
   if (!canAcceptInput(contentType, connegEnabled)) {
-    const acceptValue = connegEnabled
-      ? 'application/ld+json, application/json, text/turtle, text/n3'
-      : 'application/ld+json, application/json';
+    const acceptValue = 'application/ld+json, application/json, text/turtle, text/n3';
     reply.header('Accept', acceptValue);
     reply.header('Accept-Post', acceptValue);
     return reply.code(415).send({
       error: 'Unsupported Media Type',
-      message: connegEnabled
-        ? 'Supported types: application/ld+json, application/json, text/turtle, text/n3'
-        : 'Supported types: application/ld+json, application/json (enable conneg for Turtle/N3 support)'
+      message: 'Supported types: application/ld+json, application/json, text/turtle, text/n3'
     });
   }
 
@@ -144,9 +141,10 @@ export async function handlePost(request, reply) {
       content = Buffer.from('');
     }
 
-    // Convert Turtle/N3 to JSON-LD if conneg enabled
+    // Convert Turtle/N3 to JSON-LD (Solid requires Turtle support, so this
+    // applies regardless of --conneg)
     const inputType = contentType.split(';')[0].trim().toLowerCase();
-    if (connegEnabled && (inputType === RDF_TYPES.TURTLE || inputType === RDF_TYPES.N3)) {
+    if (inputType === RDF_TYPES.TURTLE || inputType === RDF_TYPES.N3) {
       try {
         const jsonLd = await toJsonLd(content, contentType, resourceUrl, connegEnabled);
         content = Buffer.from(JSON.stringify(jsonLd, null, 2));

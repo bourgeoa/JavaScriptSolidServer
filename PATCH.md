@@ -249,10 +249,36 @@ Dot-files (`.acl`, `.meta`) are stored as-is, never `$`-escaped. Non-RDF files
 
 ---
 
+## 10. Explicit Turtle/N3 without `--conneg` (Solid protocol)
+
+**Files:** `src/rdf/conneg.js`, `src/handlers/resource.js`,
+`src/handlers/container.js`, `bin/jss.js`, `src/server.js`, `test/conneg.test.js`
+
+JSS is JSON-LD native, but the Solid Protocol requires Turtle support. Explicit
+requests for a supported RDF serialization are now honored regardless of the
+`--conneg` flag:
+
+- `Accept: text/turtle` / `text/n3` return Turtle even with `--conneg` off.
+- `Accept: application/ld+json` and generic/no Accept keep the JSON-LD native
+  default.
+- `--conneg` now only changes the default for generic Accept (extensionless
+  URLs, `text/*` handling).
+
+Same principle on the write side: Turtle/N3 PUT/POST bodies (including `.acl`)
+are accepted and converted to JSON-LD for canonical storage, independent of
+`--conneg`. `Vary` always lists `Accept`, and `Accept-Put`/`Accept-Post` always
+advertise Turtle/N3.
+
+Fixes the solid-panes bug where the Storage navbar item never appeared: the
+client fetches containers with `Accept: text/turtle` and hardcodes parsing the
+response as Turtle, which got JSON-LD before.
+
+---
+
 ## Test summary
 
 ```
-1125 tests | 1121 pass | 3 fail (WSL1) | 1 skip | 0 cancelled
+1131 tests | 1127 pass | 3 fail (WSL1) | 1 skip | 0 cancelled
 ```
 
 All 3 failures are WSL1 environment limitations, not code bugs:

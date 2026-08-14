@@ -1,8 +1,10 @@
 /**
  * Content Negotiation Tests
  *
- * Tests Turtle <-> JSON-LD conversion with conneg enabled.
- * Note: Content negotiation is OFF by default (JSON-LD native server).
+ * Tests Turtle <-> JSON-LD conversion.
+ * Note: JSS is JSON-LD native by default, but explicit Turtle/N3 requests
+ * are honored regardless of --conneg (the Solid Protocol requires Turtle
+ * support). --conneg only changes the default for generic Accept.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -467,7 +469,7 @@ describe('Content Negotiation (conneg disabled - default)', () => {
   });
 
   describe('Default JSON-LD behavior', () => {
-    it('should always return JSON-LD regardless of Accept header', async () => {
+    it('honors explicit Accept: text/turtle even when conneg is disabled (Solid requires Turtle support)', async () => {
       // Create resource
       const data = {
         '@context': { 'foaf': 'http://xmlns.com/foaf/0.1/' },
@@ -482,15 +484,42 @@ describe('Content Negotiation (conneg disabled - default)', () => {
         auth: 'noconneg'
       });
 
-      // Request Turtle
+      // Explicit Turtle request
       const res = await request('/noconneg/public/user.json', {
         headers: { 'Accept': 'text/turtle' }
       });
 
       assertStatus(res, 200);
-      // Should still return JSON-LD when conneg disabled
+      assertHeaderContains(res, 'Content-Type', 'text/turtle');
+      const turtle = await res.text();
+      assert.ok(!turtle.trimStart().startsWith('{'),
+        `expected Turtle body, got: ${turtle.slice(0, 60)}`);
+      assert.ok(turtle.includes('DefaultUser'), 'Turtle should contain the name');
+    });
+
+    it('still defaults to JSON-LD for generic Accept when conneg is disabled', async () => {
+      const res = await request('/noconneg/public/user.json', {
+        headers: { 'Accept': '*/*' }
+      });
+
+      assertStatus(res, 200);
+      // JSON-family default: .json URLs serve application/json (mime db),
+      // other RDF URLs serve application/ld+json — but never Turtle.
+      const contentType = res.headers.get('Content-Type') || '';
+      assert.ok(contentType.includes('json'),
+        `expected JSON-family Content-Type, got: ${contentType}`);
+      assert.ok(!contentType.includes('turtle'),
+        `expected JSON, not Turtle: ${contentType}`);
       const body = await res.json();
       assert.strictEqual(body['foaf:name'], 'DefaultUser');
+    });
+
+    it('HEAD mirrors GET content-type for explicit Turtle when conneg is disabled', async () => {
+      const headers = { 'Accept': 'text/turtle' };
+      const get = await request('/noconneg/public/user.json', { headers });
+      const head = await request('/noconneg/public/user.json', { method: 'HEAD', headers });
+      assertHeaderContains(get, 'Content-Type', 'text/turtle');
+      assertHeaderContains(head, 'Content-Type', 'text/turtle');
     });
 
     it('should accept JSON-LD input', async () => {
@@ -535,14 +564,13 @@ describe('Content Negotiation (conneg disabled - default)', () => {
       assert.strictEqual(text, 'Hello World');
     });
 
-    it('should not advertise Turtle in Accept-Put when conneg disabled', async () => {
+    it('advertises Turtle in Accept-Put even when conneg disabled (Solid requires Turtle support)', async () => {
       const res = await request('/noconneg/public/');
       const acceptPut = res.headers.get('Accept-Put');
-      // Should only advertise JSON-LD, not Turtle
       assert.ok(acceptPut && acceptPut.includes('application/ld+json'),
         'Accept-Put should include application/ld+json');
-      assert.ok(!acceptPut || !acceptPut.includes('text/turtle'),
-        'Accept-Put should NOT include text/turtle when conneg disabled');
+      assert.ok(acceptPut && acceptPut.includes('text/turtle'),
+        'Accept-Put should include text/turtle');
     });
 
     it('should advertise application/json in Accept-Put when conneg disabled', async () => {
@@ -559,11 +587,36 @@ describe('Content Negotiation (conneg disabled - default)', () => {
         'Accept-Post should include application/json (canAcceptInput treats it as a JSON-LD alias)');
     });
 
-    it('should not advertise text/n3 in Accept-Put when conneg disabled', async () => {
+    it('advertises text/n3 in Accept-Put even when conneg disabled', async () => {
       const res = await request('/noconneg/public/');
       const acceptPut = res.headers.get('Accept-Put');
-      assert.ok(!acceptPut || !acceptPut.includes('text/n3'),
-        'Accept-Put should NOT include text/n3 when conneg disabled');
+      assert.ok(acceptPut && acceptPut.includes('text/n3'),
+        'Accept-Put should include text/n3 (canAcceptInput accepts it regardless of conneg)');
+    });
+
+    it('accepts Turtle PUT and stores as JSON-LD when conneg disabled', async () => {
+      const turtle = `
+        @prefix foaf: <http://xmlns.com/foaf/0.1/>.
+        <#me> foaf:name "TurtleUser".
+      `;
+
+      const res = await request('/noconneg/public/turtle-put.json', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/turtle' },
+        body: turtle,
+        auth: 'noconneg'
+      });
+
+      assertStatus(res, 201);
+
+      // Verify it's stored as JSON-LD
+      const getRes = await request('/noconneg/public/turtle-put.json', {
+        headers: { 'Accept': 'application/ld+json' }
+      });
+
+      assertStatus(getRes, 200);
+      const data = await getRes.json();
+      assert.ok(data['@context'], 'Should have @context');
     });
   });
 
@@ -584,19 +637,22 @@ describe('Content Negotiation (conneg disabled - default)', () => {
       ]
     };
 
-    it('rejects text/turtle PUT to .acl with 415', async () => {
+    it('accepts text/turtle PUT to .acl even when conneg is disabled (Solid requires Turtle support)', async () => {
       const turtle = `@prefix acl: <http://www.w3.org/ns/auth/acl#>. <#x> a acl:Authorization.`;
-      const res = await request('/noconneg/public/turtle-reject.acl', {
+      const res = await request('/noconneg/public/turtle-accept.acl', {
         method: 'PUT',
         headers: { 'Content-Type': 'text/turtle' },
         body: turtle,
         auth: 'noconneg'
       });
-      assertStatus(res, 415);
-      assertHeaderContains(res, 'Accept', 'application/ld+json');
-      assertHeaderContains(res, 'Accept', 'application/json');
-      assertHeaderContains(res, 'Accept-Put', 'application/ld+json');
-      assertHeaderContains(res, 'Accept-Put', 'application/json');
+      assert.ok(res.status < 300, `text/turtle PUT to .acl should succeed, got ${res.status}`);
+
+      const getRes = await request('/noconneg/public/turtle-accept.acl', {
+        headers: { 'Accept': 'application/ld+json' },
+        auth: 'noconneg'
+      });
+      assertStatus(getRes, 200);
+      assertHeaderContains(getRes, 'Content-Type', 'application/ld+json');
     });
 
     it('rejects text/plain PUT to .acl with 415', async () => {
