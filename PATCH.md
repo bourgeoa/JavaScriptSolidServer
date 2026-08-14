@@ -68,6 +68,19 @@ and `/api/v1/` prefix matching.
 
 **CLI:** `--activitypub` enables the AP plugin (including Mastodon routes).
 
+### Timelines (added 2026-08-14)
+
+- `GET /api/v1/timelines/public` — public timeline, no auth required.
+  Returns the union of the default user's, the request (subdomain) user's,
+  and the authenticated user's posts — and always answers 200 with an
+  array, so Mastodon clients (Phanpy/Elk) polling with
+  `?limit=1&local=true&since_id=…` no longer 404.
+- `GET /api/v1/timelines/direct` — empty-array stub (no DMs in the facade).
+- `GET /api/v1/timelines/tag/:hashtag` — empty-array stub.
+
+(`GET /api/v1/streaming/health` was added separately — Phanpy/Elk probe it
+before opening the streaming WebSocket.)
+
 ---
 
 ## 4. RemoteStorage fixes

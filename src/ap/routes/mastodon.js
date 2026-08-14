@@ -947,6 +947,55 @@ export function createTimelinesHomeHandler () {
 }
 
 /**
+ * GET /api/v1/timelines/public
+ * Public/federated timeline. JSS is a single-actor server, so the public
+ * timeline is the union of the default user's, the request's (subdomain)
+ * user's, and the authenticated user's public posts. No authentication is
+ * required — clients (Phanpy/Elk) poll this with limit=1 to detect new
+ * activity, so it must always answer 200 with an array.
+ */
+export function createTimelinesPublicHandler (getUserConfig) {
+  return async (request, reply) => {
+    const protocol = request.headers['x-forwarded-proto'] || request.protocol
+    const host = request.headers['x-forwarded-host'] || request.hostname
+    const baseUrl = `${protocol}://${host}`
+
+    const usernames = new Set(['me'])
+    const uc = typeof getUserConfig === 'function' ? getUserConfig(request) : getUserConfig
+    if (uc && uc.username) usernames.add(uc.username)
+    const auth = await getWebIdFromRequestAsync(request)
+    if (auth && auth.webId) {
+      const n = getUsernameFromWebId(auth.webId)
+      if (n) usernames.add(n)
+    }
+
+    const statuses = []
+    for (const username of usernames) {
+      statuses.push(...getPosts(username, 50).map(p => buildStatus(p, username, baseUrl)))
+    }
+    statuses.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    return reply.send(statuses.slice(0, 20))
+  }
+}
+
+/**
+ * GET /api/v1/timelines/direct
+ * Private mentions. JSS's Mastodon facade stores no DMs, so an empty array
+ * keeps Mastodon clients from erroring on the route.
+ */
+export function createTimelinesDirectHandler () {
+  return async (request, reply) => reply.send([])
+}
+
+/**
+ * GET /api/v1/timelines/tag/:hashtag
+ * Hashtag timeline. No hashtag index exists in the facade — empty array.
+ */
+export function createTimelinesTagHandler () {
+  return async (request, reply) => reply.send([])
+}
+
+/**
  * POST /api/v1/statuses
  * Create a new status (post/note)
  */

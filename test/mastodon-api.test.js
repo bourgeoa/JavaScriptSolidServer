@@ -75,6 +75,51 @@ describe('Mastodon API (activitypub enabled)', () => {
     });
   });
 
+  // ── timelines ────────────────────────────────────────────────────────────
+
+  describe('timelines', () => {
+    it('GET /api/v1/timelines/public answers 200 with an array (polling probe)', async () => {
+      const res = await request('/api/v1/timelines/public?limit=1&local=true&since_id=0');
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body), 'public timeline should be an array');
+    });
+
+    it('GET /api/v1/timelines/public includes posts created via the facade', async () => {
+      const createRes = await request('/api/v1/statuses', {
+        method: 'POST',
+        auth: 'alice',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ status: 'hello public timeline' }).toString()
+      });
+      assertStatus(createRes, 200);
+
+      const res = await request('/api/v1/timelines/public', { auth: 'alice' });
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(
+        body.some(s => JSON.stringify(s).includes('hello public timeline')),
+        'public timeline should contain the new post'
+      );
+    });
+
+    it('GET /api/v1/timelines/direct answers 200 with an empty array', async () => {
+      const res = await request('/api/v1/timelines/direct');
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body));
+      assert.strictEqual(body.length, 0);
+    });
+
+    it('GET /api/v1/timelines/tag/:hashtag answers 200 with an empty array', async () => {
+      const res = await request('/api/v1/timelines/tag/solid');
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body));
+      assert.strictEqual(body.length, 0);
+    });
+  });
+
   // ── account lookup ───────────────────────────────────────────────────────
 
   describe('GET /api/v1/accounts/lookup', () => {
