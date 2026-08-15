@@ -480,7 +480,9 @@ export function createServer(options = {}) {
       username: apUsername,
       displayName: apDisplayName,
       summary: apSummary,
-      nostrPubkey: apNostrPubkey
+      nostrPubkey: apNostrPubkey,
+      subdomains: subdomainsEnabled,
+      baseDomain
     });
   }
 

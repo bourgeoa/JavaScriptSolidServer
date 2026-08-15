@@ -66,6 +66,11 @@ describe('Mastodon API (activitypub enabled)', () => {
       assert.ok(body.title, 'should have title');
       assert.ok(body.version, 'should have version');
       assert.ok(body.configuration?.statuses?.max_characters, 'should have statuses config');
+      // uri must be a full URL (Phanpy builds its nodeinfo probe from it);
+      // domain stays host-only.
+      assert.ok(body.uri?.startsWith('http://'), 'uri should be a full URL');
+      assert.strictEqual(body.domain, body.uri.replace(/^https?:\/\//, ''),
+        'domain should be host-only');
     });
   });
 

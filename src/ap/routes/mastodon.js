@@ -564,18 +564,35 @@ export function createAccountLookupHandler () {
 }
 
 /**
- * Shared instance data builder
+ * Resolve the instance's canonical host for the request.
+ * In subdomain mode the instance identity is the account's own host
+ * (<username>.<baseDomain>, e.g. bourgeoa.pivot-test.solidproject.org:3200),
+ * not the base host the client happened to connect to.
  */
-function buildInstanceData (host, wsProtocol) {
+function getActorHostFromRequest (request, getUserConfig) {
+  const uc = typeof getUserConfig === 'function' ? getUserConfig(request) : null
+  if (uc && uc.subdomains && uc.baseDomain && uc.username) {
+    return `${uc.username}.${uc.baseDomain}`
+  }
+  return request.headers['x-forwarded-host'] || request.hostname
+}
+
+/**
+ * Shared instance data builder
+ * actorHost is the canonical host (subdomain-aware); uri is a full URL so
+ * URL-parsing clients and Phanpy's nodeinfo probe (which uses uri directly)
+ * don't try to fetch a scheme-less string.
+ */
+function buildInstanceData (actorHost, wsProtocol, protocol) {
   return {
-    uri: host,
-    domain: host,
+    uri: `${protocol}://${actorHost}`,
+    domain: actorHost,
     title: 'JSS',
     description: 'SAND Stack: Solid + ActivityPub + Nostr + DID',
     short_description: 'Solid pod with Mastodon-compatible API',
     version: '4.0.0 (compatible; JSS 0.0.99)',
     urls: {
-      streaming_api: `${wsProtocol}://${host}`
+      streaming_api: `${wsProtocol}://${actorHost}`
     },
     stats: {
       user_count: 1,
@@ -599,24 +616,24 @@ function buildInstanceData (host, wsProtocol) {
  * GET /api/v1/instance — Instance information
  * Required by most Mastodon clients before login
  */
-export function createInstanceHandler () {
+export function createInstanceHandler (getUserConfig) {
   return async (request, reply) => {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
-    const host = request.headers['x-forwarded-host'] || request.hostname
     const wsProtocol = protocol === 'https' ? 'wss' : 'ws'
-    return reply.send(buildInstanceData(host, wsProtocol))
+    const actorHost = getActorHostFromRequest(request, getUserConfig)
+    return reply.send(buildInstanceData(actorHost, wsProtocol, protocol))
   }
 }
 
 /**
  * GET /api/v2/instance — Instance information (v2 format for Elk/Phanpy)
  */
-export function createInstanceV2Handler () {
+export function createInstanceV2Handler (getUserConfig) {
   return async (request, reply) => {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
-    const host = request.headers['x-forwarded-host'] || request.hostname
     const wsProtocol = protocol === 'https' ? 'wss' : 'ws'
-    const data = buildInstanceData(host, wsProtocol)
+    const actorHost = getActorHostFromRequest(request, getUserConfig)
+    const data = buildInstanceData(actorHost, wsProtocol, protocol)
     // v2 moves stats → usage, adds thumbnail
     const v2 = {
       ...data,

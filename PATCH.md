@@ -98,7 +98,27 @@ It now uses the deployment mode set via `setApMode({ subdomains, baseDomain })`:
 - **Subdomain mode:** account host = `<username>.<baseDomain>` (e.g.
   `bourgeoa.pivot-test.solidproject.org:3200`).
 - **Path mode:** account keeps the requester's host (no host rewrite).
+### Instance identity & nodeinfo probe fix (added 2026-08-15)
 
+Phanpy builds its nodeinfo probe as `${uri}/.well-known/nodeinfo` from
+`/api/v1|v2/instance`. Two problems:
+
+1. `uri`/`domain` were the raw request host, so in subdomain mode they were
+   missing the account subdomain (base host `pivot-test.solidproject.org:3200`
+   instead of `bourgeoa.pivot-test.solidproject.org:3200`).
+2. `uri` was host-only (no scheme), so Phanpy tried to fetch the scheme-less
+   string `pivot-test.solidproject.org:3200/.well-known/nodeinfo` →
+   browser `URL scheme "pivot-test.solidproject.org" is not supported`.
+
+Fixes:
+
+- `src/server.js` now forwards `subdomains`/`baseDomain` to the ActivityPub
+  plugin (they were dropped before, so `getUserConfig`/`setApMode` never saw
+  subdomain mode — this also silently disabled the avatar fix above on real
+  subdomain deployments).
+- Instance handlers derive the canonical host via `getActorHostFromRequest`
+  (`<username>.<baseDomain>` in subdomain mode) and return `uri` as a full
+  URL while keeping `domain` host-only.
 ---
 
 ## 4. RemoteStorage fixes
