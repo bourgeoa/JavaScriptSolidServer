@@ -12,7 +12,7 @@ import { createInboxHandler } from './routes/inbox.js'
 import { createOutboxHandler, createOutboxPostHandler, createPostObjectHandler } from './routes/outbox.js'
 import { createCollectionsHandler } from './routes/collections.js'
 import { createActorHandler } from './routes/actor.js'
-import { createAppsHandler, createVerifyCredentialsHandler, createUpdateCredentialsHandler, createAccountLookupHandler, createAccountsSearchHandler, createPreferencesHandler, createListsHandler, createAccountListsHandler, createRelationshipsHandler, createFollowersHandler, createFollowingHandler, createInstanceHandler, createInstanceV2Handler, createSearchHandler, createTimelinesHomeHandler, createTimelinesPublicHandler, createTimelinesDirectHandler, createTimelinesTagHandler, createPostStatusHandler, createGetStatusHandler, createFavouriteStatusHandler, createUpdateStatusHandler, createGetAccountHandler, createGetAccountStatusesHandler, createFollowAccountHandler, createGetNotificationsHandler, getProfileMediaBuffer } from './routes/mastodon.js'
+import { createAppsHandler, createVerifyCredentialsHandler, createUpdateCredentialsHandler, createAccountLookupHandler, createAccountsSearchHandler, createPreferencesHandler, createListsHandler, createAccountListsHandler, createRelationshipsHandler, createFollowersHandler, createFollowingHandler, createInstanceHandler, createInstanceV2Handler, createSearchHandler, createTimelinesHomeHandler, createTimelinesPublicHandler, createTimelinesDirectHandler, createTimelinesTagHandler, createAccountFeaturedTagsHandler, createFollowedTagsHandler, createPostStatusHandler, createGetStatusHandler, createFavouriteStatusHandler, createUpdateStatusHandler, createGetAccountHandler, createGetAccountStatusesHandler, createFollowAccountHandler, createGetNotificationsHandler, getProfileMediaBuffer, setApMode } from './routes/mastodon.js'
 import { createAuthorizeHandler, createAuthorizePostHandler, createTokenHandler } from './routes/oauth.js'
 
 // Shared state for actor handler (accessed by server.js)
@@ -39,6 +39,10 @@ export async function activityPubPlugin(fastify, options = {}) {
 
   const subdomains = options.subdomains || false
   const baseDomain = options.baseDomain || null
+
+  // Tell the Mastodon facade how the server is deployed so it builds
+  // per-account avatar/profile URLs correctly (subdomain vs path mode).
+  setApMode({ subdomains, baseDomain })
 
   // Single-user fallback config (used when not in subdomain mode)
   const defaultConfig = {
@@ -419,6 +423,8 @@ export async function activityPubPlugin(fastify, options = {}) {
   fastify.get('/api/v1/instance', createInstanceHandler())
   fastify.get('/api/v2/instance', createInstanceV2Handler())
   fastify.get('/api/v2/search', createSearchHandler())
+  fastify.get('/api/v1/accounts/:id/featured_tags', createAccountFeaturedTagsHandler())
+  fastify.get('/api/v1/followed_tags', createFollowedTagsHandler())
   fastify.get('/api/v1/timelines/home', createTimelinesHomeHandler())
   fastify.get('/api/v1/timelines/public', createTimelinesPublicHandler(getUserConfig))
   fastify.get('/api/v1/timelines/direct', createTimelinesDirectHandler())

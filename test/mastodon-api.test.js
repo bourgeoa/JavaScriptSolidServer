@@ -13,6 +13,7 @@ import {
   request,
   createTestPod,
   getPodToken,
+  getBaseUrl,
   assertStatus
 } from './helpers.js';
 
@@ -47,6 +48,10 @@ describe('Mastodon API (activitypub enabled)', () => {
       assert.ok(typeof body.following_count === 'number', 'following_count should be a number');
       assert.ok(typeof body.statuses_count === 'number', 'statuses_count should be a number');
       assert.ok(body.source, 'should have source field');
+      // Path mode (subdomains: false): avatar must stay on the request host,
+      // not be rewritten to a bogus subdomain like alice.0.0.1.
+      assert.strictEqual(body.avatar, `${getBaseUrl()}/profile/avatar.png`,
+        'avatar should stay on the request host in path mode');
     });
   });
 
@@ -113,6 +118,26 @@ describe('Mastodon API (activitypub enabled)', () => {
 
     it('GET /api/v1/timelines/tag/:hashtag answers 200 with an empty array', async () => {
       const res = await request('/api/v1/timelines/tag/solid');
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body));
+      assert.strictEqual(body.length, 0);
+    });
+  });
+
+  // ── featured / followed tags ────────────────────────────────────────────
+
+  describe('tags', () => {
+    it('GET /api/v1/accounts/:id/featured_tags answers 200 with an empty array', async () => {
+      const res = await request('/api/v1/accounts/bourgeoa/featured_tags');
+      assertStatus(res, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body));
+      assert.strictEqual(body.length, 0);
+    });
+
+    it('GET /api/v1/followed_tags answers 200 with an empty array (Phanpy probe)', async () => {
+      const res = await request('/api/v1/followed_tags?limit=200');
       assertStatus(res, 200);
       const body = await res.json();
       assert.ok(Array.isArray(body));

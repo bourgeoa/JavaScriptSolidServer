@@ -655,32 +655,42 @@ function getUsernameFromWebId (webId) {
   }
 }
 
+// Deployment mode shared with the plugin (set via setApMode at registration).
+// In subdomain mode each account lives at <username>.<baseDomain>.
+let apMode = { subdomains: false, baseDomain: null }
+
+/**
+ * Tell the facade how the server is deployed so it can build per-account
+ * avatar/profile URLs correctly. Called once at plugin registration.
+ */
+export function setApMode (mode) {
+  apMode = mode && typeof mode === 'object'
+    ? { subdomains: !!mode.subdomains, baseDomain: mode.baseDomain || null }
+    : { subdomains: false, baseDomain: null }
+}
+
 /**
  * Build a Mastodon-compatible Account object
- * baseUrl is used to derive the domain/port; username replaces the subdomain.
+ * baseUrl is the requester's origin; the account's own URL is derived from it.
  */
 function buildAccount (username, baseUrl) {
-  // Build the account's own base URL using its subdomain, not the requester's
   let accountBaseUrl = baseUrl
+  // Subdomain mode: canonical account host is <username>.<baseDomain>
+  // (e.g. bourgeoa.pivot-test.solidproject.org:3200).
+  if (apMode.subdomains && apMode.baseDomain && username) {
+    try {
+      accountBaseUrl = `${new URL(baseUrl).protocol}//${username}.${apMode.baseDomain}`
+    } catch { /* keep baseUrl as-is */ }
+  }
+  // Path mode (single host): every account shares the requester's host, so
+  // baseUrl is used unchanged — rewriting the first hostname segment here
+  // would corrupt hosts like "pivot-test.solidproject.org" into
+  // "bourgeoa.solidproject.org" (a nonexistent domain).
   let accountHost = null
   try {
-    const u = new URL(baseUrl)
-    const hostParts = u.hostname.split('.')
-    // Replace first segment (subdomain) with this account's username
-    if (hostParts.length >= 2) {
-      hostParts[0] = username
-      u.hostname = hostParts.join('.')
-      accountBaseUrl = u.origin
-    }
-    accountHost = u.host
-  } catch { /* keep baseUrl as-is */ }
-
-  if (!accountHost) {
-    try {
-      accountHost = new URL(accountBaseUrl).host
-    } catch {
-      accountHost = null
-    }
+    accountHost = new URL(accountBaseUrl).host
+  } catch {
+    accountHost = null
   }
 
   const postCount = getPosts(username, 1000).length
@@ -992,6 +1002,24 @@ export function createTimelinesDirectHandler () {
  * Hashtag timeline. No hashtag index exists in the facade — empty array.
  */
 export function createTimelinesTagHandler () {
+  return async (request, reply) => reply.send([])
+}
+
+/**
+ * GET /api/v1/accounts/:id/featured_tags
+ * No tag-pinning feature exists in the facade — empty array keeps
+ * Phanpy/Elk profile pages from 404ing.
+ */
+export function createAccountFeaturedTagsHandler () {
+  return async (request, reply) => reply.send([])
+}
+
+/**
+ * GET /api/v1/followed_tags
+ * No hashtag-following feature exists — empty array (Phanpy polls this with
+ * ?limit=200 on load, so it must answer 200).
+ */
+export function createFollowedTagsHandler () {
   return async (request, reply) => reply.send([])
 }
 

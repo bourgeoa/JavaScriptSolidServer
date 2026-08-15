@@ -81,6 +81,24 @@ and `/api/v1/` prefix matching.
 (`GET /api/v1/streaming/health` was added separately — Phanpy/Elk probe it
 before opening the streaming WebSocket.)
 
+### Featured & followed tags (added 2026-08-15)
+
+- `GET /api/v1/accounts/:id/featured_tags` — empty-array stub (Phanpy fetches
+  this on profile pages; previously 404'd).
+- `GET /api/v1/followed_tags` — empty-array stub (Phanpy polls with
+  `?limit=200` on load).
+
+### Account/avatar URL fix (added 2026-08-15)
+
+`buildAccount` previously rewrote the first hostname segment to the username,
+so on a host like `pivot-test.solidproject.org:3200` it produced the
+nonexistent `bourgeoa.solidproject.org:3200` (avatar/header `ERR_NAME_NOT_RESOLVED`).
+It now uses the deployment mode set via `setApMode({ subdomains, baseDomain })`:
+
+- **Subdomain mode:** account host = `<username>.<baseDomain>` (e.g.
+  `bourgeoa.pivot-test.solidproject.org:3200`).
+- **Path mode:** account keeps the requester's host (no host rewrite).
+
 ---
 
 ## 4. RemoteStorage fixes
