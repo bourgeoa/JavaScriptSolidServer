@@ -119,6 +119,42 @@ Fixes:
 - Instance handlers derive the canonical host via `getActorHostFromRequest`
   (`<username>.<baseDomain>` in subdomain mode) and return `uri` as a full
   URL while keeping `domain` host-only.
+
+### Per-pod instance identity — no global `--ap-username` (added 2026-08-15)
+
+AP is **per-pod**: every pod can run ActivityPub, and there is no global
+username. The instance identity (and actor/profile URLs) must therefore
+follow the pod, not a server-wide `--ap-username` flag:
+
+- Request to a pod subdomain (`bourgeoa.pivot-test.local:4443`) → username
+  comes from the subdomain.
+- Request to the base host (`pivot-test.local:4443`) → username is derived
+  from the **authenticated pod's WebID** (token), so the identity still
+  resolves to the right pod.
+
+`getActorHostFromRequest` is now async and falls back to
+`getWebIdFromRequestAsync` → `getUsernameFromWebId` when the request has no
+subdomain. This fixes the instance `uri`/`domain` being the bare base host
+instead of the account's own host on base-host connections.
+
+### Custom emojis, CORS `Idempotency-Key` & search gating (added 2026-08-15)
+
+Local run against `pivot-test.local:4443` surfaced three Phanpy issues:
+
+- **`GET /api/v1/custom_emojis`** — Phanpy's composer fetches this on open;
+  JSS had no route (404). Added an empty-array handler.
+- **`POST /api/v1/statuses` CORS preflight** — Phanpy sends an
+  `Idempotency-Key` header, which was missing from
+  `Access-Control-Allow-Headers` (`src/ldp/headers.js`), so the browser
+  blocked the request. Header added.
+- **Fake accounts from search-as-you-type** — Phanpy searches on every
+  keystroke (`?q=a`, `?q=al`, `?q=ali`…); JSS fabricated an Account object
+  from the partial query, and `buildAccount` gave it an avatar URL on the
+  nonexistent `<prefix>.<baseDomain>` subdomain (`ERR_NAME_NOT_RESOLVED`).
+  `isLocalPod()` now gates `/api/v2/search`, `/api/v1/accounts/search` and
+  `/api/v1/accounts/lookup` to pods that actually exist (directory under the
+  data root), so partial queries return no accounts and only real pods
+  resolve.
 ---
 
 ## 4. RemoteStorage fixes
@@ -353,7 +389,7 @@ section 10.
 ## Test summary
 
 ```
-1131 tests | 1127 pass | 3 fail (WSL1) | 1 skip | 0 cancelled
+1144 tests | 1140 pass | 3 fail (WSL1) | 1 skip | 0 cancelled
 ```
 
 All 3 failures are WSL1 environment limitations, not code bugs:
@@ -370,4 +406,5 @@ These pass on native Linux (WSL2 / GitHub Actions CI).
 |------|-------|----------|
 | `test/remotestorage.test.js` | 258 | Section 4 |
 | `test/mastodon-api.test.js` | 482 | Section 3 |
+| `test/mastodon-instance.test.js` | 180 | Section 3 (subdomain-mode instance identity, custom_emojis, search gating) |
 | `test/adapter.test.js` | 85 | Subdomain base-domain root files (#307) |

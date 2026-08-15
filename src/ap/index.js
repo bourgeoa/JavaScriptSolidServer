@@ -12,7 +12,7 @@ import { createInboxHandler } from './routes/inbox.js'
 import { createOutboxHandler, createOutboxPostHandler, createPostObjectHandler } from './routes/outbox.js'
 import { createCollectionsHandler } from './routes/collections.js'
 import { createActorHandler } from './routes/actor.js'
-import { createAppsHandler, createVerifyCredentialsHandler, createUpdateCredentialsHandler, createAccountLookupHandler, createAccountsSearchHandler, createPreferencesHandler, createListsHandler, createAccountListsHandler, createRelationshipsHandler, createFollowersHandler, createFollowingHandler, createInstanceHandler, createInstanceV2Handler, createSearchHandler, createTimelinesHomeHandler, createTimelinesPublicHandler, createTimelinesDirectHandler, createTimelinesTagHandler, createAccountFeaturedTagsHandler, createFollowedTagsHandler, createPostStatusHandler, createGetStatusHandler, createFavouriteStatusHandler, createUpdateStatusHandler, createGetAccountHandler, createGetAccountStatusesHandler, createFollowAccountHandler, createGetNotificationsHandler, getProfileMediaBuffer, setApMode } from './routes/mastodon.js'
+import { createAppsHandler, createVerifyCredentialsHandler, createUpdateCredentialsHandler, createAccountLookupHandler, createAccountsSearchHandler, createPreferencesHandler, createListsHandler, createAccountListsHandler, createRelationshipsHandler, createFollowersHandler, createFollowingHandler, createInstanceHandler, createInstanceV2Handler, createSearchHandler, createTimelinesHomeHandler, createTimelinesPublicHandler, createTimelinesDirectHandler, createTimelinesTagHandler, createAccountFeaturedTagsHandler, createFollowedTagsHandler, createCustomEmojisHandler, createPostStatusHandler, createGetStatusHandler, createFavouriteStatusHandler, createUpdateStatusHandler, createGetAccountHandler, createGetAccountStatusesHandler, createFollowAccountHandler, createGetNotificationsHandler, getProfileMediaBuffer, setApMode } from './routes/mastodon.js'
 import { createAuthorizeHandler, createAuthorizePostHandler, createTokenHandler } from './routes/oauth.js'
 
 // Shared state for actor handler (accessed by server.js)
@@ -425,6 +425,7 @@ export async function activityPubPlugin(fastify, options = {}) {
   fastify.get('/api/v2/search', createSearchHandler())
   fastify.get('/api/v1/accounts/:id/featured_tags', createAccountFeaturedTagsHandler())
   fastify.get('/api/v1/followed_tags', createFollowedTagsHandler())
+  fastify.get('/api/v1/custom_emojis', createCustomEmojisHandler())
   fastify.get('/api/v1/timelines/home', createTimelinesHomeHandler())
   fastify.get('/api/v1/timelines/public', createTimelinesPublicHandler(getUserConfig))
   fastify.get('/api/v1/timelines/direct', createTimelinesDirectHandler())

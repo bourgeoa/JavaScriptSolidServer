@@ -533,6 +533,34 @@ export function createUpdateCredentialsHandler () {
 }
 
 /**
+ * GET /api/v1/custom_emojis
+ * Phanpy's composer fetches this on open; JSS has no custom emojis, so an
+ * empty array is the correct (and previously 404ing) response.
+ */
+export function createCustomEmojisHandler () {
+  return async (request, reply) => {
+    return reply.send([])
+  }
+}
+
+/**
+ * Is this a real local pod (AP actor) on this server?
+ * In subdomain mode each pod is a directory under the data root. This gate
+ * stops search-as-you-type ("a", "al", "ali"...) from fabricating accounts
+ * whose avatar/profile URLs point at nonexistent <partial>.baseDomain hosts.
+ * In path/single-host mode every local acct is accepted (existing behavior).
+ */
+function isLocalPod (username) {
+  if (!username) return false
+  if (apMode.subdomains && apMode.baseDomain) {
+    if (username === 'me') return false
+    const root = process.env.DATA_ROOT || './data'
+    return existsSync(join(root, username))
+  }
+  return true
+}
+
+/**
  * GET /api/v1/accounts/lookup?acct=alice or alice@example.org
  */
 export function createAccountLookupHandler () {
@@ -557,6 +585,10 @@ export function createAccountLookupHandler () {
       return reply.send(remote)
     }
 
+    if (!isLocalPod(parsed.username)) {
+      return reply.code(404).send({ error: 'Account not found' })
+    }
+
     const baseUrl = `${protocol}://${host}`
 
     return reply.send(buildAccount(parsed.username, baseUrl))
@@ -568,11 +600,23 @@ export function createAccountLookupHandler () {
  * In subdomain mode the instance identity is the account's own host
  * (<username>.<baseDomain>, e.g. bourgeoa.pivot-test.solidproject.org:3200),
  * not the base host the client happened to connect to.
+ *
+ * AP is per-pod: there is no global --ap-username, so the username comes from
+ * the pod subdomain. When the client connects to the base host instead, fall
+ * back to the authenticated pod's username (from its WebID) so the identity
+ * still resolves to the right pod.
  */
-function getActorHostFromRequest (request, getUserConfig) {
+async function getActorHostFromRequest (request, getUserConfig) {
   const uc = typeof getUserConfig === 'function' ? getUserConfig(request) : null
-  if (uc && uc.subdomains && uc.baseDomain && uc.username) {
-    return `${uc.username}.${uc.baseDomain}`
+  if (uc && uc.subdomains && uc.baseDomain) {
+    let username = uc.username
+    // Base host (no subdomain): derive the pod from the authenticated WebID.
+    if (!username || username === 'me') {
+      const auth = await getWebIdFromRequestAsync(request)
+      const webIdUser = auth && auth.webId ? getUsernameFromWebId(auth.webId) : null
+      if (webIdUser) username = webIdUser
+    }
+    if (username) return `${username}.${uc.baseDomain}`
   }
   return request.headers['x-forwarded-host'] || request.hostname
 }
@@ -620,7 +664,7 @@ export function createInstanceHandler (getUserConfig) {
   return async (request, reply) => {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
     const wsProtocol = protocol === 'https' ? 'wss' : 'ws'
-    const actorHost = getActorHostFromRequest(request, getUserConfig)
+    const actorHost = await getActorHostFromRequest(request, getUserConfig)
     return reply.send(buildInstanceData(actorHost, wsProtocol, protocol))
   }
 }
@@ -632,7 +676,7 @@ export function createInstanceV2Handler (getUserConfig) {
   return async (request, reply) => {
     const protocol = request.headers['x-forwarded-proto'] || request.protocol
     const wsProtocol = protocol === 'https' ? 'wss' : 'ws'
-    const actorHost = getActorHostFromRequest(request, getUserConfig)
+    const actorHost = await getActorHostFromRequest(request, getUserConfig)
     const data = buildInstanceData(actorHost, wsProtocol, protocol)
     // v2 moves stats → usage, adds thumbnail
     const v2 = {
@@ -1577,7 +1621,12 @@ export function createSearchHandler () {
     const parsed = parseAccountIdentifier(String(q).trim())
     if (parsed) {
       if (isLocalAccountDomain(parsed.domain, host)) {
-        result.accounts.push(buildAccount(parsed.username, baseUrl))
+        // Only return accounts for pods that actually exist — otherwise
+        // search-as-you-type ("a", "al", "ali"...) fabricates accounts with
+        // broken avatar URLs on nonexistent subdomains.
+        if (isLocalPod(parsed.username)) {
+          result.accounts.push(buildAccount(parsed.username, baseUrl))
+        }
       } else {
         const remote = await resolveRemoteAccount(parsed)
         if (remote) result.accounts.push(remote)
@@ -1634,6 +1683,9 @@ export function createAccountsSearchHandler () {
       const remote = await resolveRemoteAccount(parsed)
       return reply.send(remote ? [remote] : [])
     }
+
+    // Only return accounts for pods that actually exist (see isLocalPod).
+    if (!isLocalPod(parsed.username)) return reply.send([])
 
     return reply.send([buildAccount(parsed.username, baseUrl)])
   }
